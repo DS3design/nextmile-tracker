@@ -130,13 +130,12 @@ void formatMiles(char* out, size_t n, float miles, int decimals) {
 
 void main(lgfx::LovyanGFX& g, const UiData& d) {
   g.fillScreen(c(g, BLACK));
-  header(g, d.athlete[0] ? d.athlete : "Next Mile Tracker", d.wifi_ok);
-
   const float miles = d.ytd_m / 1609.344f;
   char big[24];
   formatMiles(big, sizeof big, miles, 1);
   text(g, &f_big, WHITE, BLACK, top_center, big, 160, 32);
-  g.fillRect(12, 40, 296, 2, c(g, RED));  // the big glyph box overlaps the header rule
+  // header after the number: the big glyph boxes reach up into the header band
+  header(g, d.athlete[0] ? d.athlete : "Next Mile Tracker", d.wifi_ok);
 
   char lbl[64];
   snprintf(lbl, sizeof lbl, "MILES IN %d  -  %u RUN%s", d.year, d.ytd_runs, d.ytd_runs == 1 ? "" : "S");
