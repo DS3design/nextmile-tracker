@@ -1,0 +1,8 @@
+firmware/.pio/
+firmware/src/secrets.h
+sim/build/
+sim/out/
+tools/*.ttf
+__pycache__/
+tools/_frames/
+assets/INTRO.mp4

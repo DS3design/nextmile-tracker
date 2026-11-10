@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Next Mile Tracker - Setup &amp; help</title>
+<style>
+body{margin:0;background:#000;color:#fff;font:17px/1.55 -apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:620px;margin:0 auto;padding:28px 20px 60px}
+h1{font-size:26px;letter-spacing:.04em;text-transform:uppercase;border-bottom:3px solid #e00;padding-bottom:8px}
+h2{font-size:16px;letter-spacing:.08em;text-transform:uppercase;color:#e00;margin-top:32px}
+li{margin-bottom:8px}.dim{color:#999}b{color:#fff}
+details{background:#141414;border-radius:8px;padding:10px 14px;margin:8px 0}summary{cursor:pointer;font-weight:600}
+</style>
+</head>
+<body>
+<main>
+<h1>Next Mile Tracker</h1>
+<p>Your tracker shows how many miles you've run this year, straight from Strava. It works with any watch or app that syncs to Strava (Garmin, Coros, Apple Watch, Polar, Suunto, the Strava app).</p>
+
+<h2>Setup (about 3 minutes)</h2>
+<ol>
+<li>Plug the tracker into a USB phone charger.</li>
+<li>When it shows <b>Let's get connected</b>, scan the QR code on the screen with your phone camera, or open your phone's WiFi settings and join <b>NextMile-Tracker</b>.</li>
+<li>A setup page opens. Tap <b>Configure WiFi</b>, choose your home network and type its password.</li>
+<li>The screen shows a new QR code. Scan it (your phone must be back on your home WiFi), then tap <b>Authorize</b> on Strava. Leave the box for private activities ticked so every run counts.</li>
+<li>That's it. The tracker checks Strava every 30 minutes and starts a fresh count every January 1.</li>
+</ol>
+
+<h2>Using it</h2>
+<ul>
+<li><b>Tap the screen</b> to show a QR code for the settings page, where you can set your own yearly goal, change the name shown, the brightness, the time zone, or count walks and hikes too. Tap again to go back.</li>
+<li><b>Goal bar:</b> by default your goal is to beat last year's miles by about 10%. Set your own number on the settings page any time.</li>
+<li><b>Hold the screen for 10 seconds</b> to erase WiFi, Strava and settings and start setup again (for example, before giving it to someone else).</li>
+<li>A small <span style="color:#e00">red dot</span> in the corner means the last update didn't reach Strava. It retries on its own.</li>
+</ul>
+
+<h2>Troubleshooting</h2>
+<details><summary>I can't see the NextMile-Tracker network</summary><p>Make sure the screen says <b>Let's get connected</b>. If it says <b>WiFi not found</b>, tap the screen once to reopen setup.</p></details>
+<details><summary>My WiFi isn't in the list</summary><p>The tracker only works on <b>2.4&nbsp;GHz</b> WiFi. Most routers have both; if yours shows two names, choose the one without "5G". Mesh systems usually work as-is.</p></details>
+<details><summary>Strava says "Authorize" but then the page won't load</summary><p>Your phone must be on the same home WiFi as the tracker (not cellular data). Switch WiFi on, then tap <b>Finish linking</b> on the page, or scan the code on the tracker again.</p></details>
+<details><summary>A run is missing</summary><p>Check it shows in Strava as a Run, Trail Run or Virtual Run. The tracker updates every 30 minutes; you can also tap the screen, scan the code and press <b>Update now</b>.</p></details>
+<details><summary>I moved or got a new router</summary><p>If the screen says <b>WiFi not found</b> or shows a red <b>NO WIFI</b>, tap it once and the setup network <b>NextMile-Tracker</b> comes back so you can pick your new WiFi. Your Strava link and goal are kept.</p></details>
+<p class="dim">Made by DS3design for Next Mile Apparel. Not affiliated with Strava. Data from Strava.</p>
+</main>
+</body>
+</html>
