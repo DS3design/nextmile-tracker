@@ -4,7 +4,7 @@
 
 namespace src {
 
-enum Kind : uint8_t { NONE = 0, STRAVA, GARMIN, POLAR, GOOGLE, APPLE, COROS };
+enum Kind : uint8_t { NONE = 0, STRAVA, GARMIN, POLAR, GOOGLE, APPLE, COROS, INTERVALS, WHOOP, OURA, WITHINGS };
 enum Result { OK, NET, AUTH, RATE, SCOPE, CONFIG };
 
 void begin();
@@ -20,6 +20,8 @@ String authorizeUrl(Kind k, const String& state);
 Result exchange(Kind k, const String& code, const String& scope);
 // Garmin: personal API key pasted on the setup page.
 Result linkGarmin(const String& apiKey);
+// intervals.icu: API key from Settings > Developer Settings.
+Result linkIntervals(const String& apiKey);
 // Apple: the iPhone Shortcut posts a JSON list of workouts. Token guards the endpoint.
 String appleToken();
 Result applePush(const String& token, const String& json);

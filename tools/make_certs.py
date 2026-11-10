@@ -4,7 +4,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, '..', 'firmware', 'src', 'certs_gen.h')
 WANT = ['Go Daddy Root Certificate Authority - G2', 'Starfield Root Certificate Authority - G2',
         'ISRG Root X1', 'ISRG Root X2', 'Amazon Root CA 1', 'DigiCert Global Root G2',
-'GTS Root R1', 'USERTrust RSA Certification Authority', 'GlobalSign Root R46', 'GlobalSign Root CA - R3']
+'GTS Root R1', 'USERTrust RSA Certification Authority', 'GlobalSign Root R46', 'GlobalSign Root CA - R3',
+        'GTS Root R4', 'Starfield Services Root Certificate Authority - G2']
 pem = open(certifi.where()).read()
 blocks = re.findall(r'# Label: "([^"]+)".*?(-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----)', pem, re.S)
 got = [(l, c) for l, c in blocks if l in WANT]

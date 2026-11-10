@@ -7,6 +7,8 @@
 #include <mbedtls/sha256.h>
 #include <time.h>
 
+#include <algorithm>
+
 #include <vector>
 
 #include "activities.h"
@@ -26,6 +28,23 @@ src::Kind k = src::NONE;
 String at, rt, name, garminKey, polarUser, appleTok, verifier, mcpSession;
 uint32_t expAt = 0;
 
+#ifndef WHOOP_CLIENT_ID
+#define WHOOP_CLIENT_ID ""
+#define WHOOP_CLIENT_SECRET ""
+#endif
+#ifndef OURA_CLIENT_ID
+#define OURA_CLIENT_ID ""
+#define OURA_CLIENT_SECRET ""
+#endif
+#ifndef WITHINGS_CLIENT_ID
+#define WITHINGS_CLIENT_ID ""
+#define WITHINGS_CLIENT_SECRET ""
+#endif
+
+const char* IV_API = "https://intervals.icu/api/v1/athlete/0";
+const char* WHOOP_API = "https://api.prod.whoop.com";
+const char* OURA_API = "https://api.ouraring.com";
+const char* WITHINGS_API = "https://wbsapi.withings.net";
 const char* GOOGLE_SCOPE = "https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly";
 const char* GARMIN = "https://personal.connectapi.garmin.com";
 const char* POLAR = "https://www.polaraccesslink.com/v3";
@@ -144,16 +163,27 @@ src::Result oauthToken(const String& form) {
   } else if (k == src::COROS) {
     r.url = String(COROS_ISSUER) + "/oauth2/token";
     r.body += String("&client_id=") + COROS_CLIENT_ID;
+  } else if (k == src::WHOOP) {
+    r.url = String(WHOOP_API) + "/oauth/oauth2/token";
+    r.body += String("&client_id=") + WHOOP_CLIENT_ID + "&client_secret=" + WHOOP_CLIENT_SECRET;
+    if (form.startsWith("grant_type=refresh_token")) r.body += "&scope=offline";
+  } else if (k == src::OURA) {
+    r.url = String(OURA_API) + "/oauth/token";
+    r.body += String("&client_id=") + OURA_CLIENT_ID + "&client_secret=" + OURA_CLIENT_SECRET;
+  } else if (k == src::WITHINGS) {
+    r.url = String(WITHINGS_API) + "/v2/oauth2";
+    r.body = "action=requesttoken&" + form + "&client_id=" + WITHINGS_CLIENT_ID + "&client_secret=" + WITHINGS_CLIENT_SECRET;
   } else {
     return src::CONFIG;
   }
   JsonDocument d;
   int c = net::call(r, d);
   if (c != 200) return fromCode(c);
-  at = d["access_token"] | "";
-  rt = d["refresh_token"] | rt.c_str();
-  uint32_t exp = d["expires_at"] | 0;
-  if (!exp) exp = time(nullptr) + (uint32_t)(d["expires_in"] | 3600);
+  JsonVariantConst t = k == src::WITHINGS ? d["body"].as<JsonVariantConst>() : d.as<JsonVariantConst>();  // Withings wraps it
+  at = t["access_token"] | "";
+  rt = t["refresh_token"] | rt.c_str();
+  uint32_t exp = t["expires_at"] | 0;
+  if (!exp) exp = time(nullptr) + (uint32_t)(t["expires_in"] | 3600);
   expAt = exp;
   if (k == src::POLAR) polarUser = String((long long)(d["x_user_id"] | 0LL));
   if (k == src::STRAVA) {
@@ -183,6 +213,7 @@ src::Result garminToken() {
 
 src::Result ensureToken(bool force) {
   if (k == src::APPLE) return src::OK;
+  if (k == src::INTERVALS) return garminKey.length() ? src::OK : src::AUTH;
   if (k == src::POLAR) return at.length() ? src::OK : src::AUTH;  // Polar tokens don't expire
   if (!force && at.length() && time(nullptr) < (time_t)expAt - 300) return src::OK;
   src::Result r = k == src::GARMIN ? garminToken() : oauthToken("grant_type=refresh_token&refresh_token=" + net::urlEncode(rt));
@@ -196,9 +227,9 @@ src::Result get(const String& url, JsonDocument& doc, JsonDocument* filter = nul
   net::Req q;
   q.url = url;
   q.filter = filter;
-  q.auth = "Bearer " + at;
+  q.auth = k == src::INTERVALS ? basic("API_KEY", garminKey.c_str()) : "Bearer " + at;
   int c = net::call(q, doc);
-  if (c == 401 && k != src::POLAR) {
+  if (c == 401 && k != src::POLAR && k != src::INTERVALS) {
     if ((r = ensureToken(true)) != src::OK) return r;
     q.auth = "Bearer " + at;
     doc.clear();
@@ -326,6 +357,178 @@ src::Result fetchGoogle(const String& from, const String& to, bool walks, std::v
     if (!token.length()) break;
   }
   return src::OK;
+}
+
+// ---- intervals.icu, WHOOP, Oura, Withings ----------------------------------
+
+String isoUtc(time_t t) {
+  char b[32];
+  strftime(b, sizeof b, "%Y-%m-%dT%H:%M:%S.000Z", gmtime(&t));
+  return b;
+}
+
+String localDay(time_t t) {
+  struct tm m;
+  localtime_r(&t, &m);
+  return ymd(m.tm_year + 1900, m.tm_mon + 1, m.tm_mday);
+}
+
+int32_t tzOffset(const char* s) {  // "-05:00"
+  if (!s || (s[0] != '+' && s[0] != '-')) return 0;
+  int h = 0, m = 0;
+  sscanf(s + 1, "%d:%d", &h, &m);
+  return (s[0] == '-' ? -1 : 1) * (h * 3600 + m * 60);
+}
+
+void setYear(Act& x) {
+  time_t t = x.local;
+  x.year = gmtime(&t)->tm_year + 1900;
+}
+
+const char* runName(const String& sport, bool counts) {
+  String s = sport;
+  s.toLowerCase();
+  if (s.indexOf("trail") >= 0) return "Trail Run";
+  if (s.indexOf("treadmill") >= 0 || s.indexOf("virtual") >= 0 || s.indexOf("indoor") >= 0) return "Treadmill Run";
+  if (s.indexOf("run") >= 0) return "Run";
+  if (s.indexOf("hik") >= 0) return "Hike";
+  return counts ? "Walk" : "Workout";
+}
+
+src::Result fetchIntervals(const String& from, const String& to, bool walks, std::vector<Act>& out) {
+  JsonDocument doc;
+  src::Result r = get(String(IV_API) + "/activities?oldest=" + from + "&newest=" + to +
+                          "&fields=id,start_date_local,type,distance,moving_time,name",
+                      doc);
+  if (r != src::OK) return r;
+  for (JsonObject o : doc.as<JsonArray>()) {
+    Act x;
+    const char* local = o["start_date_local"] | "";
+    x.id = hash64(o["id"].as<String>().c_str());
+    x.m = o["distance"] | 0.0f;
+    x.s = o["moving_time"] | 0;
+    x.local = acts::parseIso(local);
+    x.year = atoi(local);
+    x.counts = isRun(o["type"] | "", walks);
+    strlcpy(x.name, o["name"] | runName(o["type"] | "", x.counts), sizeof x.name);
+    out.push_back(x);
+  }
+  return src::OK;
+}
+
+src::Result fetchWhoop(const String& start, const String& end, bool walks, std::vector<Act>& out) {
+  String token;
+  for (int page = 0; page < 60; page++) {
+    JsonDocument doc;
+    String u = String(WHOOP_API) + "/developer/v2/activity/workout?limit=25&start=" + net::urlEncode(start) + "&end=" +
+               net::urlEncode(end);
+    if (token.length()) u += "&nextToken=" + net::urlEncode(token);
+    src::Result r = get(u, doc);
+    if (r != src::OK) return r;
+    for (JsonObject o : doc["records"].as<JsonArray>()) {
+      Act x;
+      int32_t a = acts::parseIso(o["start"] | ""), b = acts::parseIso(o["end"] | "");
+      x.id = hash64(o["id"] | "");
+      x.m = o["score"]["distance_meter"] | 0.0f;
+      x.s = b > a ? b - a : 0;
+      x.local = a + tzOffset(o["timezone_offset"] | "");
+      setYear(x);
+      String sport = o["sport_name"] | "";
+      x.counts = isRun(sport, walks);
+      strlcpy(x.name, runName(sport, x.counts), sizeof x.name);
+      out.push_back(x);
+    }
+    token = doc["next_token"] | "";
+    if (!token.length()) break;
+  }
+  return src::OK;
+}
+
+src::Result fetchOura(const String& from, const String& to, bool walks, std::vector<Act>& out) {
+  String token;
+  for (int page = 0; page < 40; page++) {
+    JsonDocument doc;
+    String u = String(OURA_API) + "/v2/usercollection/workout?start_date=" + from + "&end_date=" + to;
+    if (token.length()) u += "&next_token=" + net::urlEncode(token);
+    src::Result r = get(u, doc);
+    if (r != src::OK) return r;
+    for (JsonObject o : doc["data"].as<JsonArray>()) {
+      Act x;
+      const char* st = o["start_datetime"] | "";
+      int32_t a = acts::parseIso(st), b = acts::parseIso(o["end_datetime"] | "");
+      x.id = hash64(o["id"] | "");
+      x.m = o["distance"] | 0.0f;
+      x.s = b > a ? b - a : 0;
+      x.local = a;  // already local wall clock
+      x.year = atoi(st);
+      String sport = o["activity"] | "";
+      x.counts = isRun(sport, walks);
+      strlcpy(x.name, runName(sport, x.counts), sizeof x.name);
+      out.push_back(x);
+    }
+    token = doc["next_token"] | "";
+    if (!token.length()) break;
+  }
+  return src::OK;
+}
+
+// Withings workout categories: 1 walk, 2 run, 3 hiking.
+src::Result fetchWithings(const String& from, const String& to, bool walks, std::vector<Act>& out) {
+  src::Result r = ensureToken(false);
+  if (r != src::OK) return r;
+  int offset = 0;
+  bool retried = false;
+  for (int page = 0; page < 30; page++) {
+    net::Req q;
+    q.method = "POST";
+    q.url = String(WITHINGS_API) + "/v2/measure";
+    q.auth = "Bearer " + at;
+    q.body = "action=getworkouts&startdateymd=" + from + "&enddateymd=" + to + "&data_fields=distance,effduration&offset=" + offset;
+    JsonDocument d;
+    int c = net::call(q, d);
+    if (c != 200) return fromCode(c);
+    int st = d["status"] | -1;
+    if (st == 401 && !retried) {
+      retried = true;
+      if ((r = ensureToken(true)) != src::OK) return r;
+      page--;
+      continue;
+    }
+    if (st != 0) return st == 401 ? src::AUTH : st == 601 ? src::RATE : src::NET;
+    for (JsonObject o : d["body"]["series"].as<JsonArray>()) {
+      Act x;
+      int cat = o["category"] | 0;
+      time_t t = o["startdate"] | 0;
+      struct tm lt;
+      localtime_r(&t, &lt);
+      x.id = o["id"] | 0LL;
+      x.m = o["data"]["distance"] | 0.0f;
+      x.s = o["data"]["effduration"] | 0;
+      x.local = (int32_t)(acts::daysFromCivil(lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday) * 86400 + lt.tm_hour * 3600 +
+                          lt.tm_min * 60 + lt.tm_sec);
+      x.year = lt.tm_year + 1900;
+      x.counts = cat == 2 || (walks && (cat == 1 || cat == 3));
+      strlcpy(x.name, cat == 2 ? "Run" : cat == 3 ? "Hike" : cat == 1 ? "Walk" : "Workout", sizeof x.name);
+      out.push_back(x);
+    }
+    if (!(d["body"]["more"] | false)) break;
+    offset = d["body"]["offset"] | 0;
+  }
+  return src::OK;
+}
+
+src::Result fetchRange(time_t from, time_t to, bool walks, std::vector<Act>& out) {
+  src::Result r = src::OK;
+  switch (k) {
+    case src::INTERVALS:
+      for (time_t a = from; a <= to && r == src::OK; a += 91 * 86400)
+        r = fetchIntervals(localDay(a), localDay(std::min(to, a + 90 * 86400)), walks, out);
+      return r;
+    case src::WHOOP: return fetchWhoop(isoUtc(from - 86400), isoUtc(to + 86400), walks, out);
+    case src::OURA: return fetchOura(localDay(from), localDay(to + 86400), walks, out);
+    case src::WITHINGS: return fetchWithings(localDay(from), localDay(to), walks, out);
+    default: return src::CONFIG;
+  }
 }
 
 // ---- COROS MCP (JSON-RPC over HTTP) -------------------------------------------
@@ -540,6 +743,10 @@ const char* label(Kind x) {
     case GOOGLE: return "Fitbit / Pixel Watch";
     case APPLE: return "Apple Watch";
     case COROS: return "COROS";
+    case INTERVALS: return "intervals.icu (Suunto, Wahoo & more)";
+    case WHOOP: return "WHOOP";
+    case OURA: return "Oura Ring";
+    case WITHINGS: return "Withings";
     default: return "your watch";
   }
 }
@@ -549,26 +756,34 @@ bool available(Kind x) {
     case STRAVA: return strlen(STRAVA_CLIENT_ID) && strlen(STRAVA_CLIENT_SECRET);
     case POLAR: return strlen(POLAR_CLIENT_ID) && strlen(POLAR_CLIENT_SECRET);
     case GOOGLE: return strlen(GOOGLE_CLIENT_ID) && strlen(GOOGLE_CLIENT_SECRET);
+    case WHOOP: return strlen(WHOOP_CLIENT_ID) && strlen(WHOOP_CLIENT_SECRET);
+    case OURA: return strlen(OURA_CLIENT_ID) && strlen(OURA_CLIENT_SECRET);
+    case WITHINGS: return strlen(WITHINGS_CLIENT_ID) && strlen(WITHINGS_CLIENT_SECRET);
     case GARMIN:
     case APPLE:
-    case COROS: return true;
+    case COROS:
+    case INTERVALS: return true;
     default: return false;
   }
 }
 
 bool linked() {
   switch (k) {
-    case GARMIN: return garminKey.length() > 0;
+    case GARMIN:
+    case INTERVALS: return garminKey.length() > 0;
     case POLAR: return at.length() > 0;
     case APPLE: return appleTok.length() > 0;
     case STRAVA:
     case GOOGLE:
-    case COROS: return rt.length() > 0;
+    case COROS:
+    case WHOOP:
+    case OURA:
+    case WITHINGS: return rt.length() > 0;
     default: return false;
   }
 }
 
-bool hasHistory() { return k == STRAVA || k == GARMIN || k == GOOGLE || k == COROS; }
+bool hasHistory() { return k != NONE && k != POLAR && k != APPLE; }
 String athleteName() { return name; }
 
 String authorizeUrl(Kind x, const String& state) {
@@ -591,6 +806,15 @@ String authorizeUrl(Kind x, const String& state) {
              "&redirect_uri=" + redirectUri() + "&scope=" + net::urlEncode("openid offline_access mcp.tools") +
              "&code_challenge=" + pkceChallenge(verifier) + "&code_challenge_method=S256&resource=" +
              net::urlEncode(COROS_MCP) + "&state=" + st;
+    case WHOOP:
+      return String(WHOOP_API) + "/oauth/oauth2/auth?response_type=code&client_id=" + WHOOP_CLIENT_ID + "&redirect_uri=" +
+             redirectUri() + "&scope=" + net::urlEncode("read:workout read:profile offline") + "&state=" + st;
+    case OURA:
+      return String("https://cloud.ouraring.com/oauth/authorize?response_type=code&client_id=") + OURA_CLIENT_ID +
+             "&redirect_uri=" + redirectUri() + "&scope=workout&state=" + st;
+    case WITHINGS:
+      return String("https://account.withings.com/oauth2_user/authorize2?response_type=code&client_id=") + WITHINGS_CLIENT_ID +
+             "&redirect_uri=" + redirectUri() + "&scope=user.activity&state=" + st;
     default: return "";
   }
 }
@@ -601,7 +825,7 @@ void resetFor(Kind x) {
 }
 
 Result exchange(Kind x, const String& code, const String& scope) {
-  if (!available(x) || (x != STRAVA && x != POLAR && x != GOOGLE && x != COROS)) return CONFIG;
+  if (!available(x) || (x == NONE || x == GARMIN || x == APPLE || x == INTERVALS)) return CONFIG;
   if (x == COROS && !verifier.length()) return CONFIG;
   String cv = verifier;  // resetFor() wipes it
   if (x == STRAVA && scope.indexOf("activity:read") < 0) return SCOPE;
@@ -620,9 +844,36 @@ Result exchange(Kind x, const String& code, const String& scope) {
     int c = net::call(q, d);
     if (c != 200 && c != 201 && c != 409) r = fromCode(c);  // 409: already registered
   }
+  if (r == OK && x == WHOOP) {
+    JsonDocument d;
+    if (get(String(WHOOP_API) + "/developer/v2/user/profile/basic", d) == OK) {
+      String f = d["first_name"] | "", l = d["last_name"] | "";
+      if (f.length()) name = f + (l.length() ? " " + l.substring(0, 1) + "." : "");
+    }
+  }
   if (r != OK) {
     k = NONE;
     at = rt = "";
+  }
+  save();
+  return r;
+}
+
+Result linkIntervals(const String& apiKey) {
+  resetFor(INTERVALS);
+  garminKey = apiKey;
+  garminKey.trim();
+  JsonDocument filter, d;
+  filter["firstname"] = true;
+  filter["name"] = true;
+  Result r = get(String(IV_API), d, &filter);
+  if (r == OK) {
+    String n = d["firstname"] | "";
+    if (!n.length()) n = d["name"] | "";
+    name = n;
+  } else {
+    garminKey = "";
+    k = NONE;
   }
   save();
   return r;
@@ -707,6 +958,18 @@ Result sync(int year, bool full, bool walks) {
       }
       break;
     }
+    case INTERVALS:
+    case WHOOP:
+    case OURA:
+    case WITHINGS: {
+      time_t now = time(nullptr);
+      r = fetchRange(full ? acts::localYearStart(year) : now - 30 * 86400, now, walks, v);
+      if (r == OK && !full) {
+        acts::mergeWindow(year, v);
+        return OK;
+      }
+      break;
+    }
     case POLAR:
       r = fetchPolar(walks, v);
       if (r == OK) acts::merge(year, v);
@@ -729,6 +992,8 @@ Result syncLastYear(int year, bool walks) {
   Result r;
   if (k == STRAVA) r = fetchStrava(acts::localYearStart(year) - 86400, acts::localYearStart(year + 1) + 86400, 30, walks, v);
   else if (k == GARMIN) r = fetchGarmin(ymd(year, 1, 1), ymd(year, 12, 31), 30, walks, v);
+  else if (k == INTERVALS || k == WHOOP || k == OURA || k == WITHINGS)
+    r = fetchRange(acts::localYearStart(year), acts::localYearStart(year + 1) - 86400, walks, v);
   else if (k == COROS) r = fetchCoros(acts::localYearStart(year), acts::localYearStart(year + 1) - 86400, walks, v);
   else r = fetchGoogle(ymd(year, 1, 1), ymd(year + 1, 1, 1), walks, v);
   if (r != OK) return r;

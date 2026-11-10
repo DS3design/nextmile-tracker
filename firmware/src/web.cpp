@@ -171,13 +171,13 @@ void handleSave() {
 // Step 1 of linking: pick a brand. The script tacks the phone's time zone onto each link for the new-year reset.
 void handleLink() {
   String b = F("<p>Which watch or app records your runs?</p>");
-  const src::Kind order[] = {src::GARMIN, src::APPLE, src::COROS, src::GOOGLE, src::POLAR, src::STRAVA};
+  const src::Kind order[] = {src::GARMIN, src::APPLE, src::COROS, src::GOOGLE, src::POLAR, src::WHOOP, src::OURA, src::WITHINGS, src::INTERVALS, src::STRAVA};
   for (src::Kind k : order) {
     if (!src::available(k)) continue;
     b += "<a class='btn ghost' href='/go?k=" + String((int)k) + "'>" + src::label(k) + "</a>";
   }
-  b += F("<p class=dim>Suunto, Wahoo and others are coming in a free update. If yours isn't listed, check back "
-         "later; the tracker updates itself.</p><script>"
+  b += F("<p class=dim>Suunto, Wahoo, Zwift or something else? Connect it to a free intervals.icu account, then pick "
+         "intervals.icu here. More brands arrive in free updates.</p><script>"
          "var z='';try{z=Intl.DateTimeFormat().resolvedOptions().timeZone||''}catch(e){}"
          "document.querySelectorAll('a[href^=\"/go\"]').forEach(function(a){a.href+='&tz='+encodeURIComponent(z)+"
          "'&off='+new Date().getTimezoneOffset()})</script>");
@@ -206,6 +206,7 @@ void handleGo() {
   }
   src::Kind k = (src::Kind)server.arg("k").toInt();
   if (k == src::GARMIN) return redirect("/garmin");
+  if (k == src::INTERVALS) return redirect("/intervals");
   if (k == src::APPLE) {
     if (src::kind() != src::APPLE || !src::linked()) src::linkApple();
     app::onLinked();
@@ -220,6 +221,25 @@ void linkedPage() {
   String n = esc(src::athleteName());
   sendPage("You're all set", "<p>Linked to " + String(src::label(src::kind())) + (n.length() ? " as <b>" + n + "</b>" : String("")) +
                                  ". Your tracker is loading this year's runs now.</p><a class='btn ghost' href=/>Goal &amp; settings</a>");
+}
+
+void handleIntervals() {
+  if (server.method() == HTTP_POST) {
+    src::Result r = src::linkIntervals(server.arg("key"));
+    if (r == src::OK) return linkedPage();
+    return sendPage("Key not accepted", "<p>" + String(src::describe(r)) +
+                                            ". Make sure you copied the whole key.</p><a class=btn href=/intervals>Try again</a>");
+  }
+  sendPage("Link intervals.icu",
+           F("<ol><li>Make a free account at intervals.icu and connect your watch under <b>Settings &rarr; Connections</b> "
+             "(Garmin, COROS, Suunto, Polar, Wahoo and more).</li><li>On the same Settings page, scroll to <b>Developer "
+             "Settings</b> and generate an <b>API key</b>, then copy it.</li><li>Come back here, paste it below and tap "
+             "<b>Link</b>.</li></ol>"
+             "<a class='btn ghost' target=_blank href='https://intervals.icu/settings'>Open intervals.icu</a>"
+             "<form method=post action=/intervals><label>API key</label><input type=text name=key autocomplete=off "
+             "autocapitalize=off spellcheck=false required><button>Link</button></form>"
+             "<p class=dim>Connect your watch to intervals.icu directly. Runs it gets from Strava can't be passed on to "
+             "other apps.</p>"));
 }
 
 void handleGarmin() {
@@ -312,6 +332,7 @@ void begin() {
   server.on("/go", HTTP_GET, handleGo);
   server.on("/exchange", HTTP_GET, handleExchange);
   server.on("/garmin", HTTP_ANY, handleGarmin);
+  server.on("/intervals", HTTP_ANY, handleIntervals);
   server.on("/apple", HTTP_GET, handleApple);
   server.on("/api/apple", HTTP_POST, handleApplePush);
   server.on("/sync", HTTP_POST, handleSync);
