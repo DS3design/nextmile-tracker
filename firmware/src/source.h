@@ -4,7 +4,7 @@
 
 namespace src {
 
-enum Kind : uint8_t { NONE = 0, STRAVA, GARMIN, POLAR, GOOGLE, APPLE };
+enum Kind : uint8_t { NONE = 0, STRAVA, GARMIN, POLAR, GOOGLE, APPLE, COROS };
 enum Result { OK, NET, AUTH, RATE, SCOPE, CONFIG };
 
 void begin();

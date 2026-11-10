@@ -4,6 +4,7 @@
 #include <Preferences.h>
 #include <WiFi.h>
 #include <mbedtls/base64.h>
+#include <mbedtls/sha256.h>
 #include <time.h>
 
 #include <vector>
@@ -22,7 +23,7 @@ namespace {
 
 Preferences prefs;
 src::Kind k = src::NONE;
-String at, rt, name, garminKey, polarUser, appleTok;
+String at, rt, name, garminKey, polarUser, appleTok, verifier, mcpSession;
 uint32_t expAt = 0;
 
 const char* GOOGLE_SCOPE = "https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly";
@@ -30,6 +31,11 @@ const char* GARMIN = "https://personal.connectapi.garmin.com";
 const char* POLAR = "https://www.polaraccesslink.com/v3";
 const char* GHEALTH = "https://health.googleapis.com/v4/users/me/dataTypes/exercise/dataPoints";
 const char* STRAVA = "https://www.strava.com/api/v3";
+// COROS MCP: self-service OAuth 2.0 + PKCE, no partner approval. US region server.
+// Public client from dynamic registration (redirect = LINK_PAGE_URL); it has no secret.
+const char* COROS_ISSUER = "https://mcpus.coros.com";
+const char* COROS_MCP = "https://mcpus.coros.com/mcp";
+const char* COROS_CLIENT_ID = "4bdc75ae-07b7-4c5c-bd0f-27c0d96d9538";
 
 void save() {
   prefs.putUChar("k", k);
@@ -40,6 +46,7 @@ void save() {
   prefs.putString("gk", garminKey);
   prefs.putString("pu", polarUser);
   prefs.putString("ap", appleTok);
+  prefs.putString("cv", verifier);
 }
 
 src::Result fromCode(int c) {
@@ -80,6 +87,37 @@ String ymd(int y, int m, int d) {
 
 String redirectUri() { return net::urlEncode(LINK_PAGE_URL); }
 
+// ---- PKCE (COROS) -------------------------------------------------------------
+
+String b64url(const uint8_t* d, size_t n) {
+  unsigned char out[64];
+  size_t len = 0;
+  mbedtls_base64_encode(out, sizeof out, &len, d, n);
+  String s;
+  for (size_t i = 0; i < len; i++) {
+    char c = out[i];
+    if (c == '=') break;
+    s += c == '+' ? '-' : c == '/' ? '_' : c;
+  }
+  return s;
+}
+
+String newVerifier() {
+  String v;
+  char b[9];
+  for (int i = 0; i < 6; i++) {
+    snprintf(b, sizeof b, "%08lx", (unsigned long)esp_random());
+    v += b;
+  }
+  return v;
+}
+
+String pkceChallenge(const String& v) {
+  uint8_t h[32];
+  mbedtls_sha256_ret((const unsigned char*)v.c_str(), v.length(), h, 0);
+  return b64url(h, 32);
+}
+
 String basic(const char* id, const char* secret) {
   String raw = String(id) + ":" + secret;
   unsigned char out[200];
@@ -103,6 +141,9 @@ src::Result oauthToken(const String& form) {
   } else if (k == src::POLAR) {
     r.url = "https://polarremote.com/v2/oauth2/token";
     r.auth = basic(POLAR_CLIENT_ID, POLAR_CLIENT_SECRET);
+  } else if (k == src::COROS) {
+    r.url = String(COROS_ISSUER) + "/oauth2/token";
+    r.body += String("&client_id=") + COROS_CLIENT_ID;
   } else {
     return src::CONFIG;
   }
@@ -287,6 +328,190 @@ src::Result fetchGoogle(const String& from, const String& to, bool walks, std::v
   return src::OK;
 }
 
+// ---- COROS MCP (JSON-RPC over HTTP) -------------------------------------------
+
+src::Result mcpPost(const String& body, JsonDocument& doc) {
+  net::Req q;
+  q.method = "POST";
+  q.url = COROS_MCP;
+  q.contentType = "application/json";
+  q.accept = "application/json, text/event-stream";
+  q.auth = "Bearer " + at;
+  q.session = mcpSession;
+  q.body = body;
+  String text, ctype, sess;
+  int c = net::callText(q, text, &ctype, &sess);
+  if (sess.length()) mcpSession = sess;
+  if (c == 202) return src::OK;  // notification accepted
+  if (c != 200) return fromCode(c);
+  if (ctype.indexOf("event-stream") >= 0) {  // take the JSON-RPC message from the last "data:" line
+    String msg;
+    int p = 0;
+    while (p < (int)text.length()) {
+      int e = text.indexOf('\n', p);
+      if (e < 0) e = text.length();
+      String line = text.substring(p, e);
+      line.trim();
+      if (line.startsWith("data:")) {
+        String d = line.substring(5);
+        d.trim();
+        if (d.indexOf("jsonrpc") >= 0) msg = d;
+      }
+      p = e + 1;
+    }
+    text = msg;
+  }
+  if (!text.length()) return src::OK;
+  if (deserializeJson(doc, text)) return src::NET;
+  if (!doc["error"].isNull()) return src::NET;
+  return src::OK;
+}
+
+src::Result corosSession() {
+  mcpSession = "";
+  JsonDocument d;
+  src::Result r = mcpPost(F("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":"
+                            "\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"NextMileTracker\",\"version\":\"1\"}}}"),
+                          d);
+  if (r != src::OK) return r;
+  JsonDocument n;
+  mcpPost(F("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}"), n);
+  return src::OK;
+}
+
+// Seconds from "2:12:38" or "45:10".
+uint32_t clockSecs(const char* s) {
+  uint32_t parts[3] = {0, 0, 0};
+  int n = 0;
+  while (*s == ' ') s++;
+  while (n < 3 && isdigit(*s)) {
+    parts[n++] = strtoul(s, (char**)&s, 10);
+    if (*s != ':') break;
+    s++;
+  }
+  return n == 3 ? parts[0] * 3600 + parts[1] * 60 + parts[2] : n == 2 ? parts[0] * 60 + parts[1] : parts[0];
+}
+
+const char* corosName(int code) {
+  switch (code) {
+    case 100: return "Run";
+    case 101: return "Indoor Run";
+    case 102: return "Trail Run";
+    case 103: return "Track Run";
+    case 104: return "Hike";
+    default: return nullptr;
+  }
+}
+
+// querySportRecords answers in text:
+//   1. Trail Run(102) — 2026-10-03
+//      Duration: 2:12:38 | Distance: 12.03 km
+void parseCoros(const String& t, bool walks, std::vector<Act>& out) {
+  std::vector<String> keys;
+  size_t first = out.size();
+  int p = 0;
+  bool open = false;
+  while (p < (int)t.length()) {
+    int e = t.indexOf('\n', p);
+    if (e < 0) e = t.length();
+    String line = t.substring(p, e);
+    p = e + 1;
+    line.trim();
+    int dot = line.indexOf(". ");
+    int di = -1;
+    for (int i = 0; i + 10 <= (int)line.length(); i++) {
+      const char* c = line.c_str() + i;
+      if (isdigit(c[0]) && isdigit(c[1]) && isdigit(c[2]) && isdigit(c[3]) && c[4] == '-' && isdigit(c[5]) && isdigit(c[6]) &&
+          c[7] == '-' && isdigit(c[8]) && isdigit(c[9])) {
+        di = i;
+        break;
+      }
+    }
+    if (dot > 0 && dot <= 4 && isdigit(line[0]) && di > dot) {
+      Act x;
+      String sport = line.substring(dot + 2, di);
+      while (sport.length() && !isalnum(sport[sport.length() - 1]) && sport[sport.length() - 1] != ')')
+        sport.remove(sport.length() - 1);
+      sport.trim();
+      int code = 0, lp = sport.lastIndexOf('(');
+      if (lp >= 0) code = sport.substring(lp + 1).toInt();
+      String label = lp > 0 ? sport.substring(0, lp) : (lp < 0 ? sport : String());
+      label.trim();
+      String when = line.substring(di, di + 10);
+      if ((int)line.length() > di + 15 && line[di + 10] == ' ' && isdigit(line[di + 11])) when += " " + line.substring(di + 11, di + 16) + ":00";
+      x.local = acts::parseIso(when.c_str());
+      x.year = atoi(when.c_str());
+      x.counts = (code >= 100 && code <= 103) || isRun(label, walks) || (walks && code == 104);
+      const char* known = corosName(code);
+      strlcpy(x.name, known ? known : (label.length() ? label.c_str() : "Run"), sizeof x.name);
+      out.push_back(x);
+      keys.push_back(line);
+      open = true;
+      continue;
+    }
+    if (!open) continue;
+    Act& x = out.back();
+    int d = line.indexOf("Duration:");
+    if (d >= 0) x.s = clockSecs(line.c_str() + d + 9);
+    int m = line.indexOf("Distance:");
+    if (m >= 0) {
+      const char* s = line.c_str() + m + 9;
+      char* end;
+      float v = strtof(s, &end);
+      while (*end == ' ') end++;
+      x.m = strncmp(end, "km", 2) == 0 ? v * 1000 : strncmp(end, "mi", 2) == 0 ? v * 1609.344f : v;
+    }
+    if (d >= 0 || m >= 0) keys.back() += "|" + line;
+  }
+  for (size_t i = 0; i < keys.size(); i++) out[first + i].id = hash64(keys[i].c_str());
+}
+
+src::Result corosRecords(const String& from, const String& to, bool walks, std::vector<Act>& out) {
+  String body = "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"querySportRecords\","
+                "\"arguments\":{\"startDate\":\"" + from + "\",\"endDate\":\"" + to + "\",\"limit\":50}}}";
+  JsonDocument d;
+  src::Result r = mcpPost(body, d);
+  if (r != src::OK) return r;
+  JsonObject res = d["result"];
+  if (res["isError"] | false) return src::NET;
+  String text;
+  for (JsonObject c : res["content"].as<JsonArray>()) text += String(c["text"] | "") + "\n";
+  parseCoros(text, walks, out);
+  return src::OK;
+}
+
+String ymdc(int y, int m, int d) {
+  char b[10];
+  snprintf(b, sizeof b, "%04d%02d%02d", y, m, d);
+  return b;
+}
+
+// Half-month windows (50 records each) from `from` through `to`, local dates.
+src::Result fetchCoros(time_t from, time_t to, bool walks, std::vector<Act>& out) {
+  src::Result r = ensureToken(false);
+  if (r != src::OK) return r;
+  r = corosSession();
+  if (r == src::AUTH) {
+    if ((r = ensureToken(true)) != src::OK) return r;
+    r = corosSession();
+  }
+  if (r != src::OK) return r;
+  struct tm a, b;
+  localtime_r(&from, &a);
+  localtime_r(&to, &b);
+  int y = a.tm_year + 1900, mo = a.tm_mon + 1, half = a.tm_mday > 15;
+  const int ey = b.tm_year + 1900, em = b.tm_mon + 1, ehalf = b.tm_mday > 15;
+  while (y < ey || (y == ey && (mo < em || (mo == em && half <= ehalf)))) {
+    static const uint8_t days[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    int last = days[mo - 1] + (mo == 2 && ((y % 4 == 0 && y % 100) || y % 400 == 0));
+    r = corosRecords(ymdc(y, mo, half ? 16 : 1), ymdc(y, mo, half ? last : 15), walks, out);
+    if (r != src::OK) return r;
+    if (half && ++mo > 12) mo = 1, y++;
+    half = !half;
+  }
+  return src::OK;
+}
+
 }  // namespace
 
 namespace src {
@@ -301,6 +526,7 @@ void begin() {
   garminKey = prefs.getString("gk", "");
   polarUser = prefs.getString("pu", "");
   appleTok = prefs.getString("ap", "");
+  verifier = prefs.getString("cv", "");
   acts::begin();
 }
 
@@ -313,6 +539,7 @@ const char* label(Kind x) {
     case POLAR: return "Polar";
     case GOOGLE: return "Fitbit / Pixel Watch";
     case APPLE: return "Apple Watch";
+    case COROS: return "COROS";
     default: return "your watch";
   }
 }
@@ -323,7 +550,8 @@ bool available(Kind x) {
     case POLAR: return strlen(POLAR_CLIENT_ID) && strlen(POLAR_CLIENT_SECRET);
     case GOOGLE: return strlen(GOOGLE_CLIENT_ID) && strlen(GOOGLE_CLIENT_SECRET);
     case GARMIN:
-    case APPLE: return true;
+    case APPLE:
+    case COROS: return true;
     default: return false;
   }
 }
@@ -334,12 +562,13 @@ bool linked() {
     case POLAR: return at.length() > 0;
     case APPLE: return appleTok.length() > 0;
     case STRAVA:
-    case GOOGLE: return rt.length() > 0;
+    case GOOGLE:
+    case COROS: return rt.length() > 0;
     default: return false;
   }
 }
 
-bool hasHistory() { return k == STRAVA || k == GARMIN || k == GOOGLE; }
+bool hasHistory() { return k == STRAVA || k == GARMIN || k == GOOGLE || k == COROS; }
 String athleteName() { return name; }
 
 String authorizeUrl(Kind x, const String& state) {
@@ -355,6 +584,13 @@ String authorizeUrl(Kind x, const String& state) {
       return String("https://accounts.google.com/o/oauth2/v2/auth?response_type=code&access_type=offline&prompt=consent&client_id=") +
              net::urlEncode(GOOGLE_CLIENT_ID) + "&redirect_uri=" + redirectUri() + "&scope=" + net::urlEncode(GOOGLE_SCOPE) +
              "&state=" + st;
+    case COROS:
+      verifier = newVerifier();
+      prefs.putString("cv", verifier);
+      return String(COROS_ISSUER) + "/oauth2/authorize?response_type=code&client_id=" + COROS_CLIENT_ID +
+             "&redirect_uri=" + redirectUri() + "&scope=" + net::urlEncode("openid offline_access mcp.tools") +
+             "&code_challenge=" + pkceChallenge(verifier) + "&code_challenge_method=S256&resource=" +
+             net::urlEncode(COROS_MCP) + "&state=" + st;
     default: return "";
   }
 }
@@ -365,11 +601,14 @@ void resetFor(Kind x) {
 }
 
 Result exchange(Kind x, const String& code, const String& scope) {
-  if (!available(x) || (x != STRAVA && x != POLAR && x != GOOGLE)) return CONFIG;
+  if (!available(x) || (x != STRAVA && x != POLAR && x != GOOGLE && x != COROS)) return CONFIG;
+  if (x == COROS && !verifier.length()) return CONFIG;
+  String cv = verifier;  // resetFor() wipes it
   if (x == STRAVA && scope.indexOf("activity:read") < 0) return SCOPE;
   if (x == GOOGLE && scope.length() && scope.indexOf("activity_and_fitness") < 0) return SCOPE;
   resetFor(x);
-  Result r = oauthToken("grant_type=authorization_code&code=" + net::urlEncode(code) + "&redirect_uri=" + redirectUri());
+  Result r = oauthToken("grant_type=authorization_code&code=" + net::urlEncode(code) + "&redirect_uri=" + redirectUri() +
+                        (x == COROS ? "&code_verifier=" + cv : String()));
   if (r == OK && x == POLAR) {
     net::Req q;
     q.method = "POST";
@@ -459,6 +698,15 @@ Result sync(int year, bool full, bool walks) {
       }
       break;
     }
+    case COROS: {
+      time_t now = time(nullptr);
+      r = fetchCoros(full ? acts::localYearStart(year) : now - 30 * 86400, now, walks, v);
+      if (r == OK && !full) {
+        acts::mergeWindow(year, v);
+        return OK;
+      }
+      break;
+    }
     case POLAR:
       r = fetchPolar(walks, v);
       if (r == OK) acts::merge(year, v);
@@ -481,6 +729,7 @@ Result syncLastYear(int year, bool walks) {
   Result r;
   if (k == STRAVA) r = fetchStrava(acts::localYearStart(year) - 86400, acts::localYearStart(year + 1) + 86400, 30, walks, v);
   else if (k == GARMIN) r = fetchGarmin(ymd(year, 1, 1), ymd(year, 12, 31), 30, walks, v);
+  else if (k == COROS) r = fetchCoros(acts::localYearStart(year), acts::localYearStart(year + 1) - 86400, walks, v);
   else r = fetchGoogle(ymd(year, 1, 1), ymd(year + 1, 1, 1), walks, v);
   if (r != OK) return r;
   float m = 0;
@@ -503,6 +752,10 @@ void unlink() {
       q.url = "https://oauth2.googleapis.com/revoke";
       q.body = "token=" + net::urlEncode(rt.length() ? rt : at);
       net::call(q, d);
+    } else if (k == COROS) {
+      q.url = String(COROS_ISSUER) + "/oauth2/revoke";
+      q.body = "token=" + net::urlEncode(rt.length() ? rt : at) + "&client_id=" + COROS_CLIENT_ID;
+      net::call(q, d);
     } else if (k == POLAR && polarUser.length()) {
       q.method = "DELETE";
       q.url = String(POLAR) + "/users/" + polarUser;
@@ -512,7 +765,7 @@ void unlink() {
   }
   prefs.clear();
   k = NONE;
-  at = rt = name = garminKey = polarUser = appleTok = "";
+  at = rt = name = garminKey = polarUser = appleTok = verifier = mcpSession = "";
   expAt = 0;
   acts::clear();
 }

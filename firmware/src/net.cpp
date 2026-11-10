@@ -16,7 +16,7 @@ int call(const Req& r, JsonDocument& doc) {
   http.setTimeout(15000);
   if (!http.begin(client, r.url)) return -1;
   if (r.auth.length()) http.addHeader("Authorization", r.auth);
-  http.addHeader("Accept", "application/json");
+  http.addHeader("Accept", r.accept);
   int code;
   if (strcmp(r.method, "GET") == 0) {
     code = http.GET();
@@ -28,6 +28,30 @@ int call(const Req& r, JsonDocument& doc) {
     DeserializationError e = r.filter ? deserializeJson(doc, http.getStream(), DeserializationOption::Filter(*r.filter))
                                       : deserializeJson(doc, http.getStream());
     if (e && e != DeserializationError::EmptyInput) code = -2;
+  }
+  http.end();
+  return code;
+}
+
+int callText(const Req& r, String& body, String* contentType, String* session) {
+  WiFiClientSecure client;
+  client.setCACert(ROOT_CAS);
+  client.setTimeout(20);
+  HTTPClient http;
+  http.useHTTP10(true);
+  http.setTimeout(20000);
+  if (!http.begin(client, r.url)) return -1;
+  const char* keys[] = {"Content-Type", "Mcp-Session-Id"};
+  http.collectHeaders(keys, 2);
+  if (r.auth.length()) http.addHeader("Authorization", r.auth);
+  http.addHeader("Accept", r.accept);
+  if (r.session.length()) http.addHeader("Mcp-Session-Id", r.session);
+  http.addHeader("Content-Type", r.contentType);
+  int code = http.sendRequest(r.method, r.body);
+  if (code > 0) {
+    body = http.getString();
+    if (contentType) *contentType = http.header("Content-Type");
+    if (session) *session = http.header("Mcp-Session-Id");
   }
   http.end();
   return code;
