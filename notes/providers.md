@@ -59,3 +59,4 @@ Build now: Garmin (personal key pasted on setup page), Polar (Connect button, Do
 - DONE: signing key offered as user secret NEXTMILE_OTA_SIGNING_KEY (release.py reads NEXTMILE_OTA_KEY path; write secret to file first).
 - DONE: color themes. Plan: ui.cpp colour constants -> macros on current theme struct (bg, fg, grey, dim, panel, track, accent); ~8 themes (Next Mile, Light, Blue, Green, Orange, Purple, Pink, Gold); Settings.theme in Preferences; device: Info screen gets a "COLORS" button (tap cycles + redraws), web settings dropdown; sim renders each theme.
 - User said: will create GitHub repo soon; yes to walkthrough of Polar + Google dev apps (check Google testing-mode 7-day refresh token expiry!).
+- tools/write_secrets.py builds secrets.h from NEXTMILE_POLAR_/GOOGLE_ CLIENT_ID/SECRET secrets (requested from Don as user secrets).
