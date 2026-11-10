@@ -32,7 +32,9 @@ int main() {
   d.last_year = 2025; d.last_year_mi = 545; d.goal_mi = 600; d.goal_auto = true;
   d.last.valid = true; strcpy(d.last.name, "Morning Run"); d.last.meters = 5.21f * 1609.344f;
   d.last.moving_s = 50 * 60 + 22; d.last.start_local = 1794470400 + 7 * 3600;  // Tue Nov 10 2026
+  d.wx_valid = true; d.wx_temp = 53; d.wx_rain = 0; d.wx_desc = "CLEAR";
   ui::main(s, d); save(s, "out/main.ppm");
+  UiData dr = d; dr.wx_temp = 61; dr.wx_rain = 70; ui::main(s, dr); save(s, "out/main_rain.ppm");
 
   UiData d2 = d; strcpy(d2.athlete, "Jessica Martinez-Thompson"); d2.ytd_m = 1288.4f * 1609.344f; d2.ytd_runs = 241;
   d2.goal_auto = false; d2.goal_mi = 1200; strcpy(d2.last.name, "Pacegiving 2026 - Roseville Charity Run 10K");

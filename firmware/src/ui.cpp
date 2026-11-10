@@ -90,14 +90,20 @@ void drawIcon(lgfx::LovyanGFX& g, int x0, int y0, uint32_t bg) {
   }
 }
 
-void header(lgfx::LovyanGFX& g, const char* title, bool wifiOk) {
+void header(lgfx::LovyanGFX& g, const char* title, bool wifiOk, const char* right = nullptr) {
   char t[48];
   upper(t, sizeof t, title);
   int room = 320 - 24 - ICON_W - 12;
+  int rx = 320 - 18 - ICON_W;
+  g.setFont(&f_label);
   if (!wifiOk) {
+    int w = g.textWidth("NO WIFI");
+    room -= w + 8;
+    text(g, &f_label, RED, BLACK, top_right, "NO WIFI", rx, 10);
+  } else if (right && *right) {
     g.setFont(&f_label);
-    room -= g.textWidth("NO WIFI") + 8;
-    text(g, &f_label, RED, BLACK, top_right, "NO WIFI", 320 - 18 - ICON_W, 10);
+    room -= g.textWidth(right) + 20;
+    text(g, &f_label, GREY, BLACK, top_right, right, rx - 8, 10);
   }
   fit(g, &f_title, t, room);
   text(g, &f_title, WHITE, BLACK, top_left, t, 12, 4);
@@ -122,6 +128,7 @@ namespace ui {
 int themeCount() { return THEME_N; }
 const char* themeName(int i) { return THEMES[i >= 0 && i < THEME_N ? i : 0].name; }
 void setTheme(int i) { cur = i >= 0 && i < THEME_N ? i : 0; }
+uint32_t accent() { return THEMES[cur].accent; }
 
 void init() {
   if (fontsReady) return;
@@ -156,7 +163,12 @@ void main(lgfx::LovyanGFX& g, const UiData& d) {
   formatMiles(big, sizeof big, miles, 1);
   text(g, &f_big, WHITE, BLACK, top_center, big, 160, 32);
   // header after the number: the big glyph boxes reach up into the header band
-  header(g, d.athlete[0] ? d.athlete : "Next Mile Tracker", d.wifi_ok);
+  char wx[40] = "";
+  if (d.wx_valid) {
+    if (d.wx_rain >= 30) snprintf(wx, sizeof wx, "%d\u00b0  %d%% RAIN", d.wx_temp, d.wx_rain);
+    else snprintf(wx, sizeof wx, "%d\u00b0  %s", d.wx_temp, d.wx_desc);
+  }
+  header(g, d.athlete[0] ? d.athlete : "Next Mile Tracker", d.wifi_ok, wx);
 
   char lbl[64];
   snprintf(lbl, sizeof lbl, "MILES IN %d  -  %u RUN%s", d.year, d.ytd_runs, d.ytd_runs == 1 ? "" : "S");

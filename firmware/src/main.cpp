@@ -11,6 +11,7 @@
 #include "app.h"
 #include "board.h"
 #include "activities.h"
+#include "extras.h"
 #include "ota.h"
 #include "source.h"
 #include "ui.h"
@@ -47,6 +48,13 @@ uint32_t pressStart = 0, lastTouch = 0;
 int holdShown = -1;
 
 int jpegYOffset = 0;
+int blNow = -1;
+bool swallowTap = false;
+
+void applyBacklight() {
+  int b = extras::backlight();
+  if (b != blNow) lcd.setBrightness(blNow = b);
+}
 
 bool timeValid() { return time(nullptr) > 1700000000; }
 
@@ -145,6 +153,12 @@ void loadSettings() {
   c.bright = prefs.getUChar("bright", 200);
   c.walks = prefs.getBool("walks", false);
   c.theme = prefs.getUChar("theme", 0);
+  c.autoDim = prefs.getBool("adim", true);
+  c.led = prefs.getUChar("led", 1);
+  c.place = prefs.getString("place", "");
+  c.placeName = prefs.getString("placeN", "");
+  c.lat = prefs.getFloat("lat", 0);
+  c.lon = prefs.getFloat("lon", 0);
   ui::setTheme(c.theme);
 }
 
@@ -189,12 +203,42 @@ void onNetUp() {
   dirty = true;
 }
 
+// LED celebrations: a new run, every 100 miles, reaching the goal, passing last year's total.
+void checkEvents(int prevRuns, float prevMi) {
+  const acts::Totals& t = acts::totals();
+  if (t.runs <= prevRuns) return;
+  const float mi = t.meters / 1609.344f;
+  UiData d = app::uiData();
+  bool big = floorf(mi / 100) > floorf(prevMi / 100) || (d.goal_mi > 0 && prevMi < d.goal_mi && mi >= d.goal_mi) ||
+             (d.last_year_mi > 0 && prevMi <= d.last_year_mi && mi > d.last_year_mi);
+  if (big) extras::milestone();
+  else extras::newRun();
+}
+
+void updatePace() {
+  static uint32_t last = 0;
+  if (last && millis() - last < 60000) return;
+  last = millis();
+  if (!timeValid()) return;
+  UiData d = app::uiData();
+  time_t now = time(nullptr);
+  struct tm tmv;
+  localtime_r(&now, &tmv);
+  int y = tmv.tm_year + 1900;
+  int days = (y % 4 == 0 && (y % 100 != 0 || y % 400 == 0)) ? 366 : 365;
+  float frac = (tmv.tm_yday + (tmv.tm_hour * 60 + tmv.tm_min) / 1440.0f) / days;
+  extras::setAhead(d.goal_mi > 0 && d.ytd_m / 1609.344f >= d.goal_mi * frac);
+}
+
 void maybeSync() {
   if (!src::linked() || needRelink || !netUp || !timeValid()) return;
   uint32_t now = millis();
   if ((int32_t)(backoffUntil - now) > 0) return;
   const int y = localYear();
   const acts::Totals& t = acts::totals();
+  const int prevYear = t.year, prevRuns = t.runs;
+  const float prevMi = t.meters / 1609.344f;
+  const bool hadData = syncedOnce;
   bool full = wantFull || t.year != y || now - lastFull > FULL_EVERY_MS;
   bool recent = wantRecent || now - lastRecent > RECENT_EVERY_MS;
   bool lastYear = t.lastYear != y - 1;
@@ -215,6 +259,7 @@ void maybeSync() {
     lastSyncAt = now;
     syncedOnce = true;
     wantFull = wantRecent = false;
+    if (hadData && prevYear == y) checkEvents(prevRuns, prevMi);
   } else if (r == src::AUTH) {
     needRelink = true;
   } else {
@@ -312,6 +357,10 @@ void handleTouch() {
     if (!pressed) {
       pressed = true;
       pressStart = now;
+      swallowTap = extras::screenOff();  // first touch in a dark room only lights the screen
+      extras::wake();
+      extras::dismiss();
+      applyBacklight();
     }
     uint32_t held = now - pressStart;
     if (held >= HOLD_RESET_MS) factoryReset();
@@ -330,7 +379,7 @@ void handleTouch() {
     if (holdShown >= 0) {
       holdShown = -1;
       dirty = true;
-    } else if (held < TAP_MAX_MS) {
+    } else if (held < TAP_MAX_MS && !swallowTap) {
       onTap();
     }
   }
@@ -350,7 +399,13 @@ void saveSettings() {
   prefs.putUChar("bright", cfg.bright);
   prefs.putBool("walks", cfg.walks);
   prefs.putUChar("theme", cfg.theme);
-  lcd.setBrightness(cfg.bright);
+  prefs.putBool("adim", cfg.autoDim);
+  prefs.putUChar("led", cfg.led);
+  prefs.putString("place", cfg.place);
+  prefs.putString("placeN", cfg.placeName);
+  prefs.putFloat("lat", cfg.lat);
+  prefs.putFloat("lon", cfg.lon);
+  applyBacklight();
   dirty = true;
 }
 
@@ -367,6 +422,7 @@ void requestSync(bool full) {
   dirty = true;
 }
 
+void refresh() { dirty = true; }
 void requestPortal() { wantPortal = true; }
 void requestReset() { wantReset = true; }
 
@@ -422,6 +478,11 @@ UiData uiData() {
     d.goal_mi = d.last_year_mi > 0 ? ceilf(d.last_year_mi * 1.1f / 10.0f) * 10.0f : 0;
     d.goal_auto = true;
   }
+  const extras::Weather& w = extras::weather();
+  d.wx_valid = w.valid;
+  d.wx_temp = w.temp;
+  d.wx_rain = w.rain;
+  d.wx_desc = extras::describe(w.code);
   d.wifi_ok = netUp;
   d.sync_error = lastResult != src::OK;
   d.source = src::kind() == src::GOOGLE ? "FITBIT" : src::kind() == src::APPLE ? "APPLE" : src::kind() == src::POLAR ? "POLAR" : src::kind() == src::GARMIN ? "GARMIN" : "STRAVA";
@@ -442,6 +503,7 @@ void setup() {
   ota::begin();
   prefs.begin("app", false);
   loadSettings();
+  extras::begin();
   setenv("TZ", app::cfg.tz.c_str(), 1);
   tzset();
   if (!LittleFS.begin(false)) Serial.println("LittleFS mount failed; skipping intro");
@@ -458,7 +520,7 @@ void setup() {
 
   if (!haveWifi) wantPortal = true;
   draw(baseScreen());
-  lcd.setBrightness(app::cfg.bright);
+  applyBacklight();
 }
 
 void loop() {
@@ -482,6 +544,9 @@ void loop() {
 
   web::loop();
   maybeSync();
+  extras::loop(netUp && !portalActive);
+  updatePace();
+  applyBacklight();
   maybeOta();
 
   if (overlayInfo && millis() - infoSince > INFO_TIMEOUT_MS) {

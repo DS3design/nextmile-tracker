@@ -5,6 +5,7 @@
 
 #include "app.h"
 #include "activities.h"
+#include "extras.h"
 #include "ota.h"
 #include "source.h"
 #include "tz.h"
@@ -82,6 +83,13 @@ void handleRoot() {
   b += String(d.year) + " &middot; " + t.runs + (t.runs == 1 ? " run" : " runs");
   uint32_t ago = app::lastSyncAgoS();
   b += ago == UINT32_MAX ? String(" &middot; not synced yet") : " &middot; synced " + String(ago / 60) + " min ago";
+  const extras::Weather& w = extras::weather();
+  if (w.valid) {
+    b += F("<div class=dim>Today");
+    if (app::cfg.placeName.length()) b += " in " + esc(app::cfg.placeName);
+    b += ": " + String(w.temp) + "&deg;F " + extras::describe(w.code) + " &middot; high " + w.hi + " / low " + w.lo +
+         " &middot; " + w.rain + "% rain &middot; wind " + w.wind + " mph</div>";
+  }
   b += F("</div></div><form method=post action=/save>");
 
   b += F("<h2>Yearly goal</h2><label class=row><input type=radio name=gm value=auto");
@@ -122,7 +130,20 @@ void handleRoot() {
     b += "<option value='" + String(z.posix) + "'" + (sel ? " selected" : "") + ">" + z.label + "</option>";
   }
   if (!matched) b += "<option value='" + esc(app::cfg.tz) + "' selected>Phone's zone (" + esc(app::cfg.tz) + ")</option>";
-  b += F("</select><button>Save</button></form>");
+  b += F("</select><h2>Weather &amp; lights</h2><label>Your ZIP code or town (for today's running weather)</label>"
+         "<input type=text name=place maxlength=40 placeholder='e.g. 95662' value='");
+  b += esc(app::cfg.place);
+  b += F("'>");
+  String ws = extras::weatherStatus();
+  if (ws.length()) b += "<div class=dim>" + esc(ws) + "</div>";
+  else if (app::cfg.placeName.length()) b += "<div class=dim>Showing weather for " + esc(app::cfg.placeName) + "</div>";
+  b += F("<label class=row><input type=checkbox name=adim value=1");
+  if (app::cfg.autoDim) b += F(" checked");
+  b += F("> Dim the screen in a dark room</label><label>Light on the back</label><select name=led>");
+  const char* ledOpts[] = {"Off", "Glow for new runs and milestones", "Also glow softly when ahead of goal pace"};
+  for (int i = 0; i < 3; i++)
+    b += "<option value=" + String(i) + (i == app::cfg.led ? " selected>" : ">") + ledOpts[i] + "</option>";
+  b += F("</select><div class=dim>The light uses your color theme.</div><button>Save</button></form>");
 
   b += F("<h2>More</h2><form method=post action=/sync><button class=ghost>Refresh miles now</button></form>"
          "<form method=post action=/update><button class=ghost>Check for software update</button></form>"
@@ -132,7 +153,7 @@ void handleRoot() {
          "<button class=warn>Erase everything</button></form>"
          "<p class=dim>Next Mile Apparel &middot; DS3design &middot; Data from ");
   b += src::label(src::kind());
-  b += " &middot; v" + String(ota::version());
+  b += " &middot; v" + String(ota::version()) + " &middot; light " + String(extras::lightRaw());
   String us = app::updateStatus();
   if (us.length()) b += " &middot; " + esc(us);
   b += F("</p>");
@@ -163,6 +184,15 @@ void handleSave() {
     ui::setTheme(th);
   }
   if (server.hasArg("carry")) app::setCarryInMi(server.arg("carry").toFloat());
+  String place = server.arg("place");
+  place.trim();
+  if (place != c.place) {
+    c.place = place;
+    extras::locationChanged();
+  }
+  c.autoDim = server.hasArg("adim");
+  int led = server.hasArg("led") ? server.arg("led").toInt() : c.led;
+  if (led >= 0 && led <= 2) c.led = led;
   app::saveSettings();
   app::requestSync(resync);
   redirect("/");

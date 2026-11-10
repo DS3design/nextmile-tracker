@@ -27,6 +27,9 @@ struct UiData {
   bool wifi_ok = true;
   bool sync_error = false;
   const char* source = "STRAVA";
+  bool wx_valid = false;
+  int wx_temp = 0, wx_rain = 0;  // F, today's max rain chance %
+  const char* wx_desc = "";
 };
 
 namespace ui {
@@ -34,6 +37,7 @@ constexpr int THEME_BTN_Y = 172, THEME_BTN_H = 26;  // "Colors" button on the se
 int themeCount();
 const char* themeName(int i);
 void setTheme(int i);
+uint32_t accent();  // current theme's accent colour, 0xRRGGBB
 void init();
 void main(lgfx::LovyanGFX& g, const UiData& d);
 void wifiSetup(lgfx::LovyanGFX& g, const char* apName);

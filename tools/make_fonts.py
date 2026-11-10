@@ -10,7 +10,7 @@ FONTS = [
     ('font_big',   'Oswald.ttf', {'wght': 600}, 76, ' 0123456789,.-'),
     ('font_title', 'Oswald.ttf', {'wght': 600}, 26, ASCII),
     ('font_mid',   'Oswald.ttf', {'wght': 500}, 20, ASCII),
-    ('font_label', 'Oswald.ttf', {'wght': 500}, 15, ASCII),
+    ('font_label', 'Oswald.ttf', {'wght': 500}, 15, ASCII + '\u00b0'),
     ('font_body',  'Inter.ttf',  {'wght': 500, 'opsz': 14}, 14, ASCII),
 ]
 

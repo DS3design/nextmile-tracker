@@ -14,6 +14,11 @@ struct Settings {
   uint8_t bright = 200;
   bool walks = false;     // count walks and hikes too
   uint8_t theme = 0;      // ui colour theme index
+  bool autoDim = true;    // dim with the light sensor, off in a dark room
+  uint8_t led = 1;        // 0 off, 1 new runs + milestones, 2 also glow when ahead of goal pace
+  String place;           // weather location as typed (ZIP or city)
+  String placeName;       // resolved name, e.g. "Orangevale, California"
+  float lat = 0, lon = 0;
 };
 
 namespace app {
@@ -21,6 +26,7 @@ extern Settings cfg;
 void saveSettings();
 void applyTz();
 void requestSync(bool full);
+void refresh();  // redraw the current screen
 void requestPortal();
 void requestReset();
 void onLinked();
