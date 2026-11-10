@@ -40,11 +40,16 @@ uint32_t expAt = 0;
 #define WITHINGS_CLIENT_ID ""
 #define WITHINGS_CLIENT_SECRET ""
 #endif
+#ifndef WAHOO_CLIENT_ID
+#define WAHOO_CLIENT_ID ""
+#define WAHOO_CLIENT_SECRET ""
+#endif
 
 const char* IV_API = "https://intervals.icu/api/v1/athlete/0";
 const char* WHOOP_API = "https://api.prod.whoop.com";
 const char* OURA_API = "https://api.ouraring.com";
 const char* WITHINGS_API = "https://wbsapi.withings.net";
+const char* WAHOO_API = "https://api.wahooligan.com";
 const char* GOOGLE_SCOPE = "https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly";
 const char* GARMIN = "https://personal.connectapi.garmin.com";
 const char* POLAR = "https://www.polaraccesslink.com/v3";
@@ -170,6 +175,9 @@ src::Result oauthToken(const String& form) {
   } else if (k == src::OURA) {
     r.url = String(OURA_API) + "/oauth/token";
     r.body += String("&client_id=") + OURA_CLIENT_ID + "&client_secret=" + OURA_CLIENT_SECRET;
+  } else if (k == src::WAHOO) {
+    r.url = String(WAHOO_API) + "/oauth/token";
+    r.body += String("&client_id=") + WAHOO_CLIENT_ID + "&client_secret=" + WAHOO_CLIENT_SECRET;
   } else if (k == src::WITHINGS) {
     r.url = String(WITHINGS_API) + "/v2/oauth2";
     r.body = "action=requesttoken&" + form + "&client_id=" + WITHINGS_CLIENT_ID + "&client_secret=" + WITHINGS_CLIENT_SECRET;
@@ -517,6 +525,52 @@ src::Result fetchWithings(const String& from, const String& to, bool walks, std:
   return src::OK;
 }
 
+float num(JsonVariantConst v) { return v.is<const char*>() ? atof(v.as<const char*>()) : v.as<float>(); }
+
+// Wahoo workout_type_id: 1 running, 3 track, 4 trail, 5 treadmill; 6-8 walking, 9 hiking.
+// The list is newest first and has no date filter, so page back until we pass `from`.
+src::Result fetchWahoo(time_t from, time_t to, bool walks, std::vector<Act>& out) {
+  JsonDocument filter;
+  JsonObject f = filter["workouts"][0].to<JsonObject>();
+  f["id"] = f["starts"] = f["name"] = f["workout_type_id"] = true;
+  f["workout_summary"]["distance_accum"] = f["workout_summary"]["duration_active_accum"] = true;
+  const int per = 50;
+  for (int page = 1; page <= 40; page++) {
+    JsonDocument doc;
+    src::Result r = get(String(WAHOO_API) + "/v1/workouts?per_page=" + per + "&page=" + page, doc, &filter);
+    if (r != src::OK) return r;
+    JsonArray a = doc["workouts"].as<JsonArray>();
+    bool older = false;
+    for (JsonObject o : a) {
+      time_t utc = acts::parseIso(o["starts"] | "");
+      if (utc < from) {
+        older = true;
+        continue;
+      }
+      JsonObjectConst s = o["workout_summary"];
+      if (utc > to || s.isNull()) continue;  // planned workouts have no summary
+      int t = o["workout_type_id"] | -1;
+      bool run = t == 1 || t == 3 || t == 4 || t == 5, walk = t >= 6 && t <= 9;
+      Act x;
+      struct tm lt;
+      localtime_r(&utc, &lt);
+      x.id = o["id"] | 0LL;
+      x.m = num(s["distance_accum"]);
+      x.s = (uint32_t)num(s["duration_active_accum"]);
+      x.local = (int32_t)(acts::daysFromCivil(lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday) * 86400 + lt.tm_hour * 3600 +
+                          lt.tm_min * 60 + lt.tm_sec);
+      x.year = lt.tm_year + 1900;
+      x.counts = run || (walks && walk);
+      const char* def = t == 5 ? "Treadmill Run" : t == 4 ? "Trail Run" : run ? "Run" : t == 9 ? "Hike" : walk ? "Walk" : "Workout";
+      const char* n = o["name"] | "";
+      strlcpy(x.name, *n ? n : def, sizeof x.name);
+      out.push_back(x);
+    }
+    if (older || a.size() < (size_t)per) break;
+  }
+  return src::OK;
+}
+
 src::Result fetchRange(time_t from, time_t to, bool walks, std::vector<Act>& out) {
   src::Result r = src::OK;
   switch (k) {
@@ -527,6 +581,7 @@ src::Result fetchRange(time_t from, time_t to, bool walks, std::vector<Act>& out
     case src::WHOOP: return fetchWhoop(isoUtc(from - 86400), isoUtc(to + 86400), walks, out);
     case src::OURA: return fetchOura(localDay(from), localDay(to + 86400), walks, out);
     case src::WITHINGS: return fetchWithings(localDay(from), localDay(to), walks, out);
+    case src::WAHOO: return fetchWahoo(from, to + 86400, walks, out);
     default: return src::CONFIG;
   }
 }
@@ -743,10 +798,11 @@ const char* label(Kind x) {
     case GOOGLE: return "Fitbit / Pixel Watch";
     case APPLE: return "Apple Watch";
     case COROS: return "COROS";
-    case INTERVALS: return "intervals.icu (Suunto, Wahoo & more)";
+    case INTERVALS: return "intervals.icu (Suunto, Zwift & more)";
     case WHOOP: return "WHOOP";
     case OURA: return "Oura Ring";
     case WITHINGS: return "Withings";
+    case WAHOO: return "Wahoo";
     default: return "your watch";
   }
 }
@@ -759,6 +815,7 @@ bool available(Kind x) {
     case WHOOP: return strlen(WHOOP_CLIENT_ID) && strlen(WHOOP_CLIENT_SECRET);
     case OURA: return strlen(OURA_CLIENT_ID) && strlen(OURA_CLIENT_SECRET);
     case WITHINGS: return strlen(WITHINGS_CLIENT_ID) && strlen(WITHINGS_CLIENT_SECRET);
+    case WAHOO: return strlen(WAHOO_CLIENT_ID) && strlen(WAHOO_CLIENT_SECRET);
     case GARMIN:
     case APPLE:
     case COROS:
@@ -778,7 +835,8 @@ bool linked() {
     case COROS:
     case WHOOP:
     case OURA:
-    case WITHINGS: return rt.length() > 0;
+    case WITHINGS:
+    case WAHOO: return rt.length() > 0;
     default: return false;
   }
 }
@@ -815,6 +873,9 @@ String authorizeUrl(Kind x, const String& state) {
     case WITHINGS:
       return String("https://account.withings.com/oauth2_user/authorize2?response_type=code&client_id=") + WITHINGS_CLIENT_ID +
              "&redirect_uri=" + redirectUri() + "&scope=user.activity&state=" + st;
+    case WAHOO:
+      return String(WAHOO_API) + "/oauth/authorize?response_type=code&client_id=" + WAHOO_CLIENT_ID + "&redirect_uri=" +
+             redirectUri() + "&scope=" + net::urlEncode("user_read workouts_read offline_data") + "&state=" + st;
     default: return "";
   }
 }
@@ -848,6 +909,15 @@ Result exchange(Kind x, const String& code, const String& scope) {
     JsonDocument d;
     if (get(String(WHOOP_API) + "/developer/v2/user/profile/basic", d) == OK) {
       String f = d["first_name"] | "", l = d["last_name"] | "";
+      if (f.length()) name = f + (l.length() ? " " + l.substring(0, 1) + "." : "");
+    }
+  }
+  if (r == OK && x == WAHOO) {
+    JsonDocument d;
+    if (get(String(WAHOO_API) + "/v1/user", d) == OK) {
+      String f = d["first"] | "", l = d["last"] | "";
+      f.trim();
+      l.trim();
       if (f.length()) name = f + (l.length() ? " " + l.substring(0, 1) + "." : "");
     }
   }
@@ -961,7 +1031,8 @@ Result sync(int year, bool full, bool walks) {
     case INTERVALS:
     case WHOOP:
     case OURA:
-    case WITHINGS: {
+    case WITHINGS:
+    case WAHOO: {
       time_t now = time(nullptr);
       r = fetchRange(full ? acts::localYearStart(year) : now - 30 * 86400, now, walks, v);
       if (r == OK && !full) {
@@ -992,7 +1063,7 @@ Result syncLastYear(int year, bool walks) {
   Result r;
   if (k == STRAVA) r = fetchStrava(acts::localYearStart(year) - 86400, acts::localYearStart(year + 1) + 86400, 30, walks, v);
   else if (k == GARMIN) r = fetchGarmin(ymd(year, 1, 1), ymd(year, 12, 31), 30, walks, v);
-  else if (k == INTERVALS || k == WHOOP || k == OURA || k == WITHINGS)
+  else if (k == INTERVALS || k == WHOOP || k == OURA || k == WITHINGS || k == WAHOO)
     r = fetchRange(acts::localYearStart(year), acts::localYearStart(year + 1) - 86400, walks, v);
   else if (k == COROS) r = fetchCoros(acts::localYearStart(year), acts::localYearStart(year + 1) - 86400, walks, v);
   else r = fetchGoogle(ymd(year, 1, 1), ymd(year + 1, 1, 1), walks, v);
@@ -1020,6 +1091,11 @@ void unlink() {
     } else if (k == COROS) {
       q.url = String(COROS_ISSUER) + "/oauth2/revoke";
       q.body = "token=" + net::urlEncode(rt.length() ? rt : at) + "&client_id=" + COROS_CLIENT_ID;
+      net::call(q, d);
+    } else if (k == WAHOO) {
+      q.method = "DELETE";
+      q.url = String(WAHOO_API) + "/v1/permissions";
+      q.auth = "Bearer " + at;
       net::call(q, d);
     } else if (k == POLAR && polarUser.length()) {
       q.method = "DELETE";

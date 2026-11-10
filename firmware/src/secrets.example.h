@@ -17,6 +17,8 @@
 // https://developer.withings.com/dashboard (Public API, scope: user.activity)
 #define WITHINGS_CLIENT_ID ""
 #define WITHINGS_CLIENT_SECRET ""
+#define WAHOO_CLIENT_ID ""
+#define WAHOO_CLIENT_SECRET ""
 // https://www.strava.com/settings/api (needs a Strava subscription)
 #define STRAVA_CLIENT_ID ""
 #define STRAVA_CLIENT_SECRET ""

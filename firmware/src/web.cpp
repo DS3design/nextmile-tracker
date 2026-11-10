@@ -201,12 +201,12 @@ void handleSave() {
 // Step 1 of linking: pick a brand. The script tacks the phone's time zone onto each link for the new-year reset.
 void handleLink() {
   String b = F("<p>Which watch or app records your runs?</p>");
-  const src::Kind order[] = {src::GARMIN, src::APPLE, src::COROS, src::GOOGLE, src::POLAR, src::WHOOP, src::OURA, src::WITHINGS, src::INTERVALS, src::STRAVA};
+  const src::Kind order[] = {src::GARMIN, src::APPLE, src::COROS, src::GOOGLE, src::POLAR, src::WHOOP, src::OURA, src::WITHINGS, src::WAHOO, src::INTERVALS, src::STRAVA};
   for (src::Kind k : order) {
     if (!src::available(k)) continue;
     b += "<a class='btn ghost' href='/go?k=" + String((int)k) + "'>" + src::label(k) + "</a>";
   }
-  b += F("<p class=dim>Suunto, Wahoo, Zwift or something else? Connect it to a free intervals.icu account, then pick "
+  b += F("<p class=dim>Suunto, Zwift or something else? Connect it to a free intervals.icu account, then pick "
          "intervals.icu here. More brands arrive in free updates.</p><script>"
          "var z='';try{z=Intl.DateTimeFormat().resolvedOptions().timeZone||''}catch(e){}"
          "document.querySelectorAll('a[href^=\"/go\"]').forEach(function(a){a.href+='&tz='+encodeURIComponent(z)+"
