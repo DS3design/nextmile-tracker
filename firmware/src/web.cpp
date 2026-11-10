@@ -4,7 +4,9 @@
 #include <WiFi.h>
 
 #include "app.h"
-#include "strava.h"
+#include "activities.h"
+#include "ota.h"
+#include "source.h"
 #include "tz.h"
 
 namespace {
@@ -68,8 +70,8 @@ String miles(float m) {
 }
 
 void handleRoot() {
-  if (!strava::linked()) return redirect("/link");
-  const strava::Totals& t = strava::totals();
+  if (!src::linked()) return redirect("/link");
+  const acts::Totals& t = acts::totals();
   UiData d = app::uiData();
   String b;
   b += F("<div class=card><div class=dim>");
@@ -93,8 +95,14 @@ void handleRoot() {
   if (app::cfg.goalMi > 0) b += String((int)app::cfg.goalMi);
   b += F("' onfocus=\"document.querySelector('[value=own]').checked=true\">");
 
+  if (src::kind() == src::POLAR) {
+    b += F("<label>Miles you ran this year before linking</label><input type=number name=carry min=0 max=10000 "
+           "step=0.1 inputmode=decimal value='");
+    b += String(app::carryInMi(), 1);
+    b += F("'><div class=dim>Polar only shares runs from after you link, so add earlier miles here.</div>");
+  }
   b += F("<h2>Screen</h2><label>Name on screen</label><input type=text name=name maxlength=30 placeholder='");
-  b += esc(strava::athleteName());
+  b += esc(src::athleteName());
   b += F("' value='");
   b += esc(app::cfg.name);
   b += F("'><label>Brightness</label><input type=range name=bright min=20 max=255 value=");
@@ -112,12 +120,18 @@ void handleRoot() {
   if (!matched) b += "<option value='" + esc(app::cfg.tz) + "' selected>Phone's zone (" + esc(app::cfg.tz) + ")</option>";
   b += F("</select><button>Save</button></form>");
 
-  b += F("<h2>More</h2><form method=post action=/sync><button class=ghost>Update now</button></form>"
-         "<a class='btn ghost' href=/link>Link a different Strava account</a>"
+  b += F("<h2>More</h2><form method=post action=/sync><button class=ghost>Refresh miles now</button></form>"
+         "<form method=post action=/update><button class=ghost>Check for software update</button></form>"
+         "<a class='btn ghost' href=/link>Link a different watch</a>"
          "<form method=post action=/wifi><button class=ghost>Change WiFi</button></form>"
-         "<form method=post action=/reset onsubmit=\"return confirm('Erase WiFi, Strava link and settings?')\">"
+         "<form method=post action=/reset onsubmit=\"return confirm('Erase WiFi, watch link and settings?')\">"
          "<button class=warn>Erase everything</button></form>"
-         "<p class=dim>Next Mile Apparel &middot; DS3design &middot; Data from Strava</p>");
+         "<p class=dim>Next Mile Apparel &middot; DS3design &middot; Data from ");
+  b += src::label(src::kind());
+  b += " &middot; v" + String(ota::version());
+  String us = app::updateStatus();
+  if (us.length()) b += " &middot; " + esc(us);
+  b += F("</p>");
   sendPage("Next Mile Tracker", b);
 }
 
@@ -139,23 +153,26 @@ void handleSave() {
   }
   bool resync = tzChanged || walks != c.walks;
   c.walks = walks;
+  if (server.hasArg("carry")) app::setCarryInMi(server.arg("carry").toFloat());
   app::saveSettings();
   app::requestSync(resync);
   redirect("/");
 }
 
-// Step 1 of linking: grab the phone's time zone, then bounce to Strava.
+// Step 1 of linking: pick a brand. The script tacks the phone's time zone onto each link for the new-year reset.
 void handleLink() {
-  if (!strava::configured()) {
-    return sendPage("Not ready", "<p>This tracker's firmware is missing its Strava app keys. Contact DS3design.</p>", 500);
+  String b = F("<p>Which watch or app records your runs?</p>");
+  const src::Kind order[] = {src::GARMIN, src::APPLE, src::GOOGLE, src::POLAR, src::STRAVA};
+  for (src::Kind k : order) {
+    if (!src::available(k)) continue;
+    b += "<a class='btn ghost' href='/go?k=" + String((int)k) + "'>" + src::label(k) + "</a>";
   }
-  sendPage("Connect Strava",
-           F("<p>Opening Strava&hellip;</p><p class=dim>On the Strava page tap <b>Authorize</b>. Leave "
-             "&ldquo;View data about your private activities&rdquo; ticked so every run counts.</p>"
-             "<a class=btn id=go href=/go>Continue to Strava</a><script>"
-             "var z='';try{z=Intl.DateTimeFormat().resolvedOptions().timeZone||''}catch(e){}"
-             "location.replace('/go?tz='+encodeURIComponent(z)+'&off='+new Date().getTimezoneOffset())"
-             "</script>"));
+  b += F("<p class=dim>Coros, Suunto, Wahoo and others are coming in a free update. If yours isn't listed, check back "
+         "later; the tracker updates itself.</p><script>"
+         "var z='';try{z=Intl.DateTimeFormat().resolvedOptions().timeZone||''}catch(e){}"
+         "document.querySelectorAll('a[href^=\"/go\"]').forEach(function(a){a.href+='&tz='+encodeURIComponent(z)+"
+         "'&off='+new Date().getTimezoneOffset()})</script>");
+  sendPage("Link your watch", b);
 }
 
 void handleGo() {
@@ -178,33 +195,89 @@ void handleGo() {
       app::saveSettings();
     }
   }
-  redirect(strava::authorizeUrl(app::ip()));
+  src::Kind k = (src::Kind)server.arg("k").toInt();
+  if (k == src::GARMIN) return redirect("/garmin");
+  if (k == src::APPLE) {
+    if (src::kind() != src::APPLE || !src::linked()) src::linkApple();
+    app::onLinked();
+    return redirect("/apple");
+  }
+  if (!src::available(k)) return sendPage("Not available yet", F("<p>That brand isn't switched on in this tracker yet.</p><a class=btn href=/link>Back</a>"));
+  redirect(src::authorizeUrl(k, app::ip()));
 }
 
-// Step 2: the GitHub Pages link page forwards Strava's one-time code here.
+void linkedPage() {
+  app::onLinked();
+  String n = esc(src::athleteName());
+  sendPage("You're all set", "<p>Linked to " + String(src::label(src::kind())) + (n.length() ? " as <b>" + n + "</b>" : String("")) +
+                                 ". Your tracker is loading this year's runs now.</p><a class='btn ghost' href=/>Goal &amp; settings</a>");
+}
+
+void handleGarmin() {
+  if (server.method() == HTTP_POST) {
+    src::Result r = src::linkGarmin(server.arg("key"));
+    if (r == src::OK) return linkedPage();
+    return sendPage("Key not accepted", "<p>" + String(src::describe(r)) +
+                                            ". Make sure you copied the whole key.</p><a class=btn href=/garmin>Try again</a>");
+  }
+  sendPage("Link Garmin",
+           F("<ol><li>Tap <b>Open Garmin Connect</b> and sign in.</li><li>Tap <b>Create Key</b>, choose <b>1 year</b>, "
+             "then copy the key. Garmin only shows it once.</li><li>Come back here, paste it below and tap <b>Link</b>.</li></ol>"
+             "<a class='btn ghost' target=_blank href='https://connect.garmin.com/app/settings/personalApiToken'>Open Garmin Connect</a>"
+             "<form method=post action=/garmin><label>Personal API key</label><input type=text name=key autocomplete=off "
+             "autocapitalize=off spellcheck=false required><button>Link</button></form>"
+             "<p class=dim>Garmin emails you before the key expires. Make a new one and paste it here the same way.</p>"));
+}
+
+void handleApple() {
+  String url = "http://" + app::ip() + "/api/apple?t=" + src::appleToken();
+  String b = F("<p>Apple Watch runs live in the Health app on your iPhone, so an iPhone Shortcut sends your miles to the "
+               "tracker. Set it up once:</p><ol>"
+               "<li>Open the <b>Shortcuts</b> app &rarr; <b>Automation</b> &rarr; <b>+</b> &rarr; <b>Time of Day</b>, every day "
+               "(for example 9 PM), <b>Run Immediately</b>.</li>"
+               "<li>Add <b>Find Health Samples</b>: Workouts, Type is Running, Start Date is in this year. Then "
+               "<b>Calculate Statistics</b> &rarr; Sum of Distance (miles).</li>"
+               "<li>Add <b>Get Contents of URL</b>: Method POST, Request Body JSON with keys <code>year</code>, "
+               "<code>miles</code> (the sum), <code>runs</code> (count) and the URL below.</li></ol>"
+               "<label>Tracker address for the Shortcut</label><input type=text readonly onclick='this.select()' value='");
+  b += esc(url);
+  b += F("'><p class=dim>Your iPhone must be home on the same WiFi when it runs. A ready-made Shortcut link is on the "
+         "Next Mile Tracker help page.</p><a class='btn ghost' href=/>Goal &amp; settings</a>");
+  sendPage("Link Apple Watch", b);
+}
+
+void handleApplePush() {
+  src::Result r = src::applePush(server.arg("t"), server.arg("plain"));
+  if (r == src::OK) app::onPushed();
+  server.send(r == src::OK ? 200 : (r == src::AUTH ? 403 : 400), "application/json",
+              r == src::OK ? "{\"ok\":true}" : "{\"ok\":false}");
+}
+
+// Step 2: the GitHub Pages link page forwards the one-time code here, with src=<brand number>.
 void handleExchange() {
+  src::Kind k = server.hasArg("src") ? (src::Kind)server.arg("src").toInt() : src::STRAVA;
   if (server.hasArg("error") || !server.hasArg("code")) {
-    return sendPage("Not linked", F("<p>Strava wasn't connected (Cancel was tapped).</p><a class=btn href=/link>Try again</a>"));
+    return sendPage("Not linked", F("<p>Your watch account wasn't connected (Cancel was tapped).</p><a class=btn href=/link>Try again</a>"));
   }
-  strava::Result r = strava::exchange(server.arg("code"), server.arg("scope"));
-  if (r == strava::OK) {
-    app::onLinked();
-    String n = esc(strava::athleteName());
-    return sendPage("You're all set", "<p>Linked to Strava" + (n.length() ? " as <b>" + n + "</b>" : String("")) +
-                                          ". Your tracker is loading this year's runs now.</p>"
-                                          "<a class='btn ghost' href=/>Goal &amp; settings</a>");
-  }
-  if (r == strava::SCOPE) {
+  src::Result r = src::exchange(k, server.arg("code"), server.arg("scope"));
+  if (r == src::OK) return linkedPage();
+  if (r == src::SCOPE) {
     return sendPage("One more step", F("<p>The tracker needs permission to read your activities. Tap below and leave "
                                        "the activity boxes ticked.</p><a class=btn href=/link>Try again</a>"));
   }
-  sendPage("Something went wrong", "<p>" + String(strava::describe(r)) +
+  sendPage("Something went wrong", "<p>" + String(src::describe(r)) +
                                        ". Check the tracker's WiFi and try again.</p><a class=btn href=/link>Try again</a>");
 }
 
 void handleSync() {
   app::requestSync(false);
   redirect("/");
+}
+
+void handleUpdate() {
+  sendPage("Checking for updates", F("<p>If there's a new version the tracker downloads it, shows progress on its screen and "
+                                     "restarts. Your link and goal are kept.</p><a class='btn ghost' href=/>Back</a>"));
+  app::requestUpdate();
 }
 
 void handleWifi() {
@@ -229,8 +302,12 @@ void begin() {
   server.on("/link", HTTP_GET, handleLink);
   server.on("/go", HTTP_GET, handleGo);
   server.on("/exchange", HTTP_GET, handleExchange);
+  server.on("/garmin", HTTP_ANY, handleGarmin);
+  server.on("/apple", HTTP_GET, handleApple);
+  server.on("/api/apple", HTTP_POST, handleApplePush);
   server.on("/sync", HTTP_POST, handleSync);
   server.on("/wifi", HTTP_POST, handleWifi);
+  server.on("/update", HTTP_POST, handleUpdate);
   server.on("/reset", HTTP_POST, handleReset);
   server.onNotFound([] { redirect("/"); });
   server.begin();

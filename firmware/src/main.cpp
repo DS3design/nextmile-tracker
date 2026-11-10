@@ -1,4 +1,4 @@
-// Next Mile mile tracker: shows a runner's Strava miles for the current year on an ESP32 CYD.
+// Next Mile mile tracker: shows a runner's watch miles for the current year on an ESP32 CYD.
 #include <Arduino.h>
 #include <ESPmDNS.h>
 #include <JPEGDEC.h>
@@ -10,7 +10,9 @@
 
 #include "app.h"
 #include "board.h"
-#include "strava.h"
+#include "activities.h"
+#include "ota.h"
+#include "source.h"
 #include "ui.h"
 #include "web.h"
 
@@ -21,6 +23,7 @@ enum class Screen { None, Portal, Connecting, Clock, WifiRetry, Link, Main, Info
 const uint32_t RECENT_EVERY_MS = 30UL * 60 * 1000;
 const uint32_t FULL_EVERY_MS = 24UL * 60 * 60 * 1000;
 const uint32_t INFO_TIMEOUT_MS = 60UL * 1000;
+const uint32_t OTA_FIRST_MS = 3UL * 60 * 1000, OTA_EVERY_MS = 24UL * 60 * 60 * 1000, HEALTHY_MS = 2UL * 60 * 1000;
 const uint32_t HOLD_SHOW_MS = 2000, HOLD_RESET_MS = 10000, TAP_MAX_MS = 1500;
 
 LGFX lcd;
@@ -37,7 +40,7 @@ bool portalActive = false, netUp = false, everConnected = false;
 bool wantFull = true, wantRecent = false, wantPortal = false, wantReset = false, needRelink = false;
 uint32_t lastFull = 0, lastRecent = 0, lastSyncAt = 0, backoffUntil = 0, bootMs = 0;
 bool syncedOnce = false;
-strava::Result lastResult = strava::OK;
+src::Result lastResult = src::OK;
 
 bool pressed = false;
 uint32_t pressStart = 0, lastTouch = 0;
@@ -162,8 +165,8 @@ void startPortal() {
 }
 
 void factoryReset() {
-  ui::message(lcd, "Erasing...", "Removing WiFi, Strava and settings.", nullptr);
-  strava::unlink();
+  ui::message(lcd, "Erasing...", "Removing WiFi, watch link and settings.", nullptr);
+  src::unlink();
   prefs.clear();
   wm.resetSettings();
   delay(500);
@@ -181,11 +184,11 @@ void onNetUp() {
 }
 
 void maybeSync() {
-  if (!strava::linked() || needRelink || !netUp || !timeValid()) return;
+  if (!src::linked() || needRelink || !netUp || !timeValid()) return;
   uint32_t now = millis();
   if ((int32_t)(backoffUntil - now) > 0) return;
   const int y = localYear();
-  const strava::Totals& t = strava::totals();
+  const acts::Totals& t = acts::totals();
   bool full = wantFull || t.year != y || now - lastFull > FULL_EVERY_MS;
   bool recent = wantRecent || now - lastRecent > RECENT_EVERY_MS;
   bool lastYear = t.lastYear != y - 1;
@@ -195,29 +198,53 @@ void maybeSync() {
     ui::message(lcd, "Loading your runs...", "Adding up this year's miles.", nullptr);
     shown = Screen::None;
   }
-  strava::Result r = strava::OK;
-  if (full || recent) r = strava::sync(y, full, app::cfg.walks);
-  if (r == strava::OK && strava::totals().lastYear != y - 1) r = strava::syncLastYear(y - 1, app::cfg.walks);
+  src::Result r = src::OK;
+  if (full || recent) r = src::sync(y, full, app::cfg.walks);
+  if (r == src::OK && acts::totals().lastYear != y - 1) r = src::syncLastYear(y - 1, app::cfg.walks);
 
   lastResult = r;
-  if (r == strava::OK) {
+  if (r == src::OK) {
     if (full) lastFull = now;
     lastRecent = now;
     lastSyncAt = now;
     syncedOnce = true;
     wantFull = wantRecent = false;
-  } else if (r == strava::AUTH) {
+  } else if (r == src::AUTH) {
     needRelink = true;
   } else {
-    backoffUntil = now + (r == strava::RATE ? 60UL : 5UL) * 60 * 1000;
+    backoffUntil = now + (r == src::RATE ? 60UL : 5UL) * 60 * 1000;
   }
+  dirty = true;
+}
+
+uint32_t otaLast = 0;
+bool otaChecked = false, wantOta = false;
+String otaStatus;
+
+void otaProgress(int pct) {
+  char b[32];
+  snprintf(b, sizeof b, "Downloading... %d%%", pct);
+  ui::message(lcd, "Updating", b, "Keep the tracker plugged in.");
+}
+
+void maybeOta() {
+  uint32_t now = millis();
+  if (now - bootMs > HEALTHY_MS) ota::markHealthy();
+  if (!netUp || portalActive || !ota::enabled()) return;
+  bool due = wantOta || (!otaChecked && now - bootMs > OTA_FIRST_MS) || (otaChecked && now - otaLast > OTA_EVERY_MS);
+  if (!due || shown == Screen::Info) return;
+  wantOta = false;
+  otaChecked = true;
+  otaLast = now;
+  lcd.startWrite();
+  otaStatus = ota::check(otaProgress);  // restarts on success
+  lcd.endWrite();
   dirty = true;
 }
 
 Screen baseScreen() {
   if (portalActive) return Screen::Portal;
-  if (!strava::configured()) return Screen::NotConfigured;
-  bool showData = strava::linked() && !needRelink;
+  bool showData = src::linked() && !needRelink;
   if (showData && overlayInfo && netUp) return Screen::Info;
   if (showData) return Screen::Main;
   if (!netUp) return (everConnected || millis() - bootMs > 30000) ? Screen::WifiRetry : Screen::Connecting;
@@ -335,14 +362,34 @@ void onLinked() {
   dirty = true;
 }
 
+void onPushed() {
+  lastSyncAt = millis();
+  syncedOnce = true;
+  lastResult = src::OK;
+  needRelink = false;
+  dirty = true;
+}
+
+float carryInMi() { return prefs.getFloat("carryMi", 0); }
+
+void setCarryInMi(float mi) {
+  if (mi < 0 || mi > 20000) return;
+  prefs.putFloat("carryMi", mi);
+  if (timeValid()) acts::setCarryIn(localYear(), mi * 1609.344f);
+  dirty = true;
+}
+
 String ip() { return WiFi.localIP().toString(); }
+
+void requestUpdate() { wantOta = true; }
+String updateStatus() { return otaStatus; }
 
 uint32_t lastSyncAgoS() { return syncedOnce ? (millis() - lastSyncAt) / 1000 : UINT32_MAX; }
 
 UiData uiData() {
-  const strava::Totals& t = strava::totals();
+  const acts::Totals& t = acts::totals();
   UiData d;
-  String n = cfg.name.length() ? cfg.name : strava::athleteName();
+  String n = cfg.name.length() ? cfg.name : src::athleteName();
   strlcpy(d.athlete, n.c_str(), sizeof d.athlete);
   d.year = timeValid() ? localYear() : (t.year ? t.year : 2026);
   bool current = t.year == d.year;
@@ -360,7 +407,8 @@ UiData uiData() {
     d.goal_auto = true;
   }
   d.wifi_ok = netUp;
-  d.sync_error = lastResult != strava::OK;
+  d.sync_error = lastResult != src::OK;
+  d.source = src::kind() == src::GOOGLE ? "FITBIT" : src::kind() == src::APPLE ? "APPLE" : src::kind() == src::POLAR ? "POLAR" : src::kind() == src::GARMIN ? "GARMIN" : "STRAVA";
   return d;
 }
 
@@ -375,12 +423,13 @@ void setup() {
   lcd.fillScreen(TFT_BLACK);
   ui::init();
 
+  ota::begin();
   prefs.begin("app", false);
   loadSettings();
   setenv("TZ", app::cfg.tz.c_str(), 1);
   tzset();
   if (!LittleFS.begin(false)) Serial.println("LittleFS mount failed; skipping intro");
-  strava::begin();
+  src::begin();
 
   WiFi.mode(WIFI_STA);
   WiFi.setHostname("nextmile");
@@ -417,6 +466,7 @@ void loop() {
 
   web::loop();
   maybeSync();
+  maybeOta();
 
   if (overlayInfo && millis() - infoSince > INFO_TIMEOUT_MS) {
     overlayInfo = false;

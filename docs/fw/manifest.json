@@ -1,0 +1,17 @@
+{
+ "version": 1,
+ "builds": {
+  "cyd_ili9341": {
+   "url": "https://ds3design.github.io/nextmile-tracker/fw/cyd_ili9341-v1.bin",
+   "size": 1432448,
+   "sha256": "4f8e146db1d27189b5d2dbb69e6b88094fa7c5b4034816d0b2254aecd2f886de",
+   "sig": "MEUCIQDW2Vpg0EPAlYO/QwdrRADxVISwn/VXwS+EpkfdRZ7GmwIgfng1cj75vsUmsIkEc520aukVgk7VZGBSi8nbWGgaujo="
+  },
+  "cyd_st7789": {
+   "url": "https://ds3design.github.io/nextmile-tracker/fw/cyd_st7789-v1.bin",
+   "size": 1432416,
+   "sha256": "229ae30d778332de1706a9add879df4e26284202ccff1a697767feb83d22f0d9",
+   "sig": "MEUCIE3wRetqO2J54JiLsLvRE3ruxAuxzUCi3wdnDyh+l3ICAiEAjno9/cDwg3+bDIj6nOpT7d3lubZI0wqyIh7o8sAMk4s="
+  }
+ }
+}

@@ -23,6 +23,11 @@ void requestSync(bool full);
 void requestPortal();
 void requestReset();
 void onLinked();
+void onPushed();
+void requestUpdate();
+String updateStatus();
+float carryInMi();
+void setCarryInMi(float mi);
 UiData uiData();
 String ip();
 uint32_t lastSyncAgoS();  // UINT32_MAX = never

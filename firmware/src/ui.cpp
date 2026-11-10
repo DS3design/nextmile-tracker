@@ -235,10 +235,10 @@ void wifiRetry(lgfx::LovyanGFX& g, const char* ssid) {
 
 void linkStrava(lgfx::LovyanGFX& g, const char* url, const char* ip, bool relink) {
   g.fillScreen(c(g, BLACK));
-  header(g, relink ? "Reconnect Strava" : "Connect Strava", true);
-  text(g, &f_label, RED, BLACK, top_left, relink ? "STRAVA NEEDS YOU TO SIGN IN AGAIN" : "STEP 2 OF 2  -  STRAVA", 12, 46);
+  header(g, relink ? "Reconnect your watch" : "Link your watch", true);
+  text(g, &f_label, RED, BLACK, top_left, relink ? "YOUR WATCH ACCOUNT NEEDS TO RELINK" : "STEP 2 OF 2  -  YOUR WATCH", 12, 46);
   qr(g, url, 18, 84, 104);
-  const char* ls[] = {"Scan with your phone", "camera, then tap", "Authorize in Strava."};
+  const char* ls[] = {"Scan with your phone", "camera, then pick", "your watch brand."};
   lines(g, &f_body, WHITE, 140, 72, 19, ls, 3);
   const char* ls2[] = {"Phone must be on the", "same WiFi as this", "tracker. Or open:"};
   lines(g, &f_body, GREY, 140, 138, 19, ls2, 3);
@@ -270,7 +270,7 @@ void info(lgfx::LovyanGFX& g, const char* url, const char* ip, const char* ssid)
   strcpy(wf, w);
   fit(g, &f_body, wf, 168);
   text(g, &f_body, GREY, BLACK, top_left, wf, 140, 126);
-  text(g, &f_body, GREY, BLACK, top_left, "Data from Strava", 140, 150);
+  text(g, &f_body, GREY, BLACK, top_left, "Data from your watch", 140, 150);
   text(g, &f_label, DIM, BLACK, top_center, "HOLD 10 SECONDS TO ERASE & START OVER", 160, 196);
   text(g, &f_label, DIM, BLACK, top_center, "TAP TO GO BACK", 160, 216);
 }
@@ -282,7 +282,7 @@ void resetHold(lgfx::LovyanGFX& g, int secondsLeft) {
   snprintf(n, sizeof n, "%d", secondsLeft);
   text(g, &f_big, RED, BLACK, top_center, n, 160, 46);
   text(g, &f_mid, WHITE, BLACK, top_center, "Keep holding to erase", 160, 140);
-  text(g, &f_mid, WHITE, BLACK, top_center, "WiFi, Strava and your goal.", 160, 164);
+  text(g, &f_mid, WHITE, BLACK, top_center, "WiFi, watch link and goal.", 160, 164);
   text(g, &f_body, GREY, BLACK, top_center, "Let go to cancel.", 160, 200);
 }
 
