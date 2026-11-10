@@ -30,6 +30,10 @@ struct UiData {
 };
 
 namespace ui {
+constexpr int THEME_BTN_Y = 172, THEME_BTN_H = 26;  // "Colors" button on the settings screen
+int themeCount();
+const char* themeName(int i);
+void setTheme(int i);
 void init();
 void main(lgfx::LovyanGFX& g, const UiData& d);
 void wifiSetup(lgfx::LovyanGFX& g, const char* apName);

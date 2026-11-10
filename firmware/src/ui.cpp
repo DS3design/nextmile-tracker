@@ -9,13 +9,29 @@
 
 namespace {
 
-constexpr uint32_t BLACK = 0x000000;
-constexpr uint32_t WHITE = 0xFFFFFF;
-constexpr uint32_t GREY = 0x9A9A9A;
-constexpr uint32_t DIM = 0x5A5A5A;
-constexpr uint32_t PANEL = 0x161616;
-constexpr uint32_t TRACK = 0x2C2C2C;
-constexpr uint32_t RED = 0xFF0000;
+struct Theme {
+  const char* name;
+  uint32_t bg, fg, grey, dim, panel, track, accent;
+};
+const Theme THEMES[] = {
+    {"Next Mile", 0x000000, 0xFFFFFF, 0x9A9A9A, 0x5A5A5A, 0x161616, 0x2C2C2C, 0xFF0000},
+    {"Daylight", 0xFFFFFF, 0x000000, 0x555555, 0x8A8A8A, 0xEDEDED, 0xD4D4D4, 0xE00000},
+    {"Ocean", 0x000A1A, 0xFFFFFF, 0x8FA6C4, 0x4C5F7A, 0x0D1D33, 0x1B2F4D, 0x1E90FF},
+    {"Neon", 0x000000, 0xFFFFFF, 0x9A9A9A, 0x5A5A5A, 0x0F1A0F, 0x1F301F, 0x39FF14},
+    {"Sunset", 0x120600, 0xFFFFFF, 0xB09A8A, 0x6A5444, 0x221208, 0x3A2212, 0xFF7A00},
+    {"Ultraviolet", 0x07000F, 0xFFFFFF, 0xA89ABF, 0x5E4F78, 0x170D26, 0x2A1A42, 0xB24BFF},
+    {"Flamingo", 0x000000, 0xFFFFFF, 0x9A9A9A, 0x5A5A5A, 0x1A0C14, 0x33182A, 0xFF3FA4},
+    {"Gold Medal", 0x000000, 0xFFFFFF, 0x9A9A9A, 0x5A5A5A, 0x171308, 0x2E2610, 0xFFC400},
+};
+constexpr int THEME_N = sizeof THEMES / sizeof THEMES[0];
+int cur = 0;
+#define BLACK (THEMES[cur].bg)
+#define WHITE (THEMES[cur].fg)
+#define GREY (THEMES[cur].grey)
+#define DIM (THEMES[cur].dim)
+#define PANEL (THEMES[cur].panel)
+#define TRACK (THEMES[cur].track)
+#define RED (THEMES[cur].accent)
 
 lgfx::PointerWrapper w_big, w_title, w_mid, w_label, w_body;
 lgfx::VLWfont f_big, f_title, f_mid, f_label, f_body;
@@ -63,11 +79,12 @@ void fit(lgfx::LovyanGFX& g, const lgfx::IFont* f, char* s, int maxW) {
 
 void drawIcon(lgfx::LovyanGFX& g, int x0, int y0, uint32_t bg) {
   int br = bg >> 16, bgc = (bg >> 8) & 0xFF, bb = bg & 0xFF;
+  int fr = WHITE >> 16, fg = (WHITE >> 8) & 0xFF, fb = WHITE & 0xFF;
   for (int y = 0; y < ICON_H; y++) {
     for (int x = 0; x < ICON_W; x++) {
       uint8_t a = icon_mtn_a8[y * ICON_W + x];
       if (a < 8) continue;
-      int r = br + (255 - br) * a / 255, gg = bgc + (255 - bgc) * a / 255, b = bb + (255 - bb) * a / 255;
+      int r = br + (fr - br) * a / 255, gg = bgc + (fg - bgc) * a / 255, b = bb + (fb - bb) * a / 255;
       g.drawPixel(x0 + x, y0 + y, g.color888(r, gg, b));
     }
   }
@@ -89,7 +106,7 @@ void header(lgfx::LovyanGFX& g, const char* title, bool wifiOk) {
 }
 
 void qr(lgfx::LovyanGFX& g, const char* s, int x, int y, int size) {
-  g.fillRoundRect(x - 6, y - 6, size + 12, size + 12, 6, c(g, WHITE));
+  g.fillRoundRect(x - 6, y - 6, size + 12, size + 12, 6, c(g, 0xFFFFFF));  // QR stays dark-on-light in every theme
   g.qrcode(s, x, y, size, 1, false);
 }
 
@@ -101,6 +118,10 @@ void lines(lgfx::LovyanGFX& g, const lgfx::IFont* f, uint32_t fg, int x, int y, 
 }  // namespace
 
 namespace ui {
+
+int themeCount() { return THEME_N; }
+const char* themeName(int i) { return THEMES[i >= 0 && i < THEME_N ? i : 0].name; }
+void setTheme(int i) { cur = i >= 0 && i < THEME_N ? i : 0; }
 
 void init() {
   if (fontsReady) return;
@@ -271,8 +292,14 @@ void info(lgfx::LovyanGFX& g, const char* url, const char* ip, const char* ssid)
   fit(g, &f_body, wf, 168);
   text(g, &f_body, GREY, BLACK, top_left, wf, 140, 126);
   text(g, &f_body, GREY, BLACK, top_left, "Data from your watch", 140, 150);
-  text(g, &f_label, DIM, BLACK, top_center, "HOLD 10 SECONDS TO ERASE & START OVER", 160, 196);
-  text(g, &f_label, DIM, BLACK, top_center, "TAP TO GO BACK", 160, 216);
+  g.fillRoundRect(18, THEME_BTN_Y, 284, THEME_BTN_H, 6, c(g, PANEL));
+  g.drawRoundRect(18, THEME_BTN_Y, 284, THEME_BTN_H, 6, c(g, RED));
+  char t[48], tn[24];
+  upper(tn, sizeof tn, THEMES[cur].name);
+  snprintf(t, sizeof t, "COLORS: %s  -  TAP TO CHANGE", tn);
+  text(g, &f_label, WHITE, PANEL, middle_center, t, 160, THEME_BTN_Y + THEME_BTN_H / 2);
+  text(g, &f_label, DIM, BLACK, top_center, "HOLD 10 SECONDS TO ERASE & START OVER", 160, 204);
+  text(g, &f_label, DIM, BLACK, top_center, "TAP ANYWHERE ELSE TO GO BACK", 160, 222);
 }
 
 void resetHold(lgfx::LovyanGFX& g, int secondsLeft) {

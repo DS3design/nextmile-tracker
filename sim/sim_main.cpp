@@ -46,6 +46,16 @@ int main() {
   ui::linkStrava(s, "http://192.168.1.42/link", "192.168.1.42", false); save(s, "out/setup_strava.ppm");
   ui::message(s, "Loading your runs...", "Adding up this year's miles.", nullptr); save(s, "out/loading.ppm");
   ui::info(s, "http://192.168.1.42/", "192.168.1.42", "Schomer-Home"); save(s, "out/info.ppm");
+  for (int t = 0; t < ui::themeCount(); t++) {
+    char p[40];
+    snprintf(p, sizeof p, "out/theme_%d.ppm", t);
+    ui::setTheme(t);
+    ui::main(s, d);
+    save(s, p);
+  }
+  ui::setTheme(1);
+  ui::info(s, "http://192.168.1.42/", "192.168.1.42", "Schomer-Home"); save(s, "out/info_daylight.ppm");
+  ui::setTheme(0);
   ui::resetHold(s, 6); save(s, "out/reset.ppm");
   ui::wifiRetry(s, "Schomer-Home"); save(s, "out/wifi_retry.ppm");
   return 0;

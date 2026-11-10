@@ -13,6 +13,7 @@ struct Settings {
   float goalMi = 0;       // 0 = beat last year
   uint8_t bright = 200;
   bool walks = false;     // count walks and hikes too
+  uint8_t theme = 0;      // ui colour theme index
 };
 
 namespace app {

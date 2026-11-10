@@ -56,3 +56,6 @@ Build now: Garmin (personal key pasted on setup page), Polar (Connect button, Do
 - NEXT: compile both envs; fix errors; sim renders; OTA (partitions, ota.cpp, tools/sign_release.py, manifest), smaller intro; docs/index.html + README + card provider text; partner application drafts; commit.
 - DONE OTA: partitions (app0/app1 0x1A0000, LittleFS 0xA0000), ota.{h,cpp} (manifest docs/fw/manifest.json, sha256 + ECDSA P-256 verify, boot-count rollback), tools/release.py keygen/publish, firmware/src/ota_pubkey.h, FW_VERSION/FW_ENV flags, /update route, intro re-encoded q=10 (510 KB).
 - Signing key generated at ~/.nextmile/ota_signing_key.pem on Devin VM ONLY -> Don must back it up (offer to save as Devin secret NEXTMILE_OTA_KEY).
+- DONE: signing key offered as user secret NEXTMILE_OTA_SIGNING_KEY (release.py reads NEXTMILE_OTA_KEY path; write secret to file first).
+- DONE: color themes. Plan: ui.cpp colour constants -> macros on current theme struct (bg, fg, grey, dim, panel, track, accent); ~8 themes (Next Mile, Light, Blue, Green, Orange, Purple, Pink, Gold); Settings.theme in Preferences; device: Info screen gets a "COLORS" button (tap cycles + redraws), web settings dropdown; sim renders each theme.
+- User said: will create GitHub repo soon; yes to walkthrough of Polar + Google dev apps (check Google testing-mode 7-day refresh token expiry!).

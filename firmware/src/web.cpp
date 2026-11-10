@@ -109,7 +109,11 @@ void handleRoot() {
   b += String(app::cfg.bright);
   b += F("><label class=row><input type=checkbox name=walks value=1");
   if (app::cfg.walks) b += F(" checked");
-  b += F("> Count walks and hikes too</label><label>Time zone (for the new-year reset)</label><select name=tz>");
+  b += F("> Count walks and hikes too</label><label>Colors</label><select name=theme>");
+  for (int i = 0; i < ui::themeCount(); i++)
+    b += "<option value=" + String(i) + (i == app::cfg.theme ? " selected>" : ">") + ui::themeName(i) + "</option>";
+  b += F("</select><div class=dim>Or tap the tracker's screen, then tap Colors to cycle through them.</div>"
+         "<label>Time zone (for the new-year reset)</label><select name=tz>");
   bool matched = false;
   for (const TzEntry& z : TZ_TABLE) {
     if (!z.label) continue;
@@ -153,6 +157,11 @@ void handleSave() {
   }
   bool resync = tzChanged || walks != c.walks;
   c.walks = walks;
+  int th = server.hasArg("theme") ? server.arg("theme").toInt() : -1;
+  if (th >= 0 && th < ui::themeCount()) {
+    c.theme = th;
+    ui::setTheme(th);
+  }
   if (server.hasArg("carry")) app::setCarryInMi(server.arg("carry").toFloat());
   app::saveSettings();
   app::requestSync(resync);

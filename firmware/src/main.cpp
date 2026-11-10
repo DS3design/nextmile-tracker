@@ -73,9 +73,13 @@ bool drawJpeg(uint8_t* buf, size_t len, int yOffset) {
   return true;
 }
 
+int32_t touchY = 0;
+
 bool touched() {
   int32_t x, y;
-  return lcd.getTouch(&x, &y);
+  if (!lcd.getTouch(&x, &y)) return false;
+  touchY = y;
+  return true;
 }
 
 void fade(int from, int to, int ms) {
@@ -140,6 +144,8 @@ void loadSettings() {
   c.goalMi = prefs.getFloat("goal", 0);
   c.bright = prefs.getUChar("bright", 200);
   c.walks = prefs.getBool("walks", false);
+  c.theme = prefs.getUChar("theme", 0);
+  ui::setTheme(c.theme);
 }
 
 void startPortal() {
@@ -283,7 +289,16 @@ void onTap() {
         wantPortal = true;  // no WiFi for a while: let them pick a new network
       }
       break;
-    case Screen::Info: overlayInfo = false; break;
+    case Screen::Info:
+      if (touchY >= ui::THEME_BTN_Y - 10 && touchY <= ui::THEME_BTN_Y + ui::THEME_BTN_H + 6) {
+        app::cfg.theme = (app::cfg.theme + 1) % ui::themeCount();
+        ui::setTheme(app::cfg.theme);
+        app::saveSettings();
+        infoSince = millis();
+      } else {
+        overlayInfo = false;
+      }
+      break;
     case Screen::WifiRetry: wantPortal = true; break;
     default: break;
   }
@@ -334,6 +349,7 @@ void saveSettings() {
   prefs.putFloat("goal", cfg.goalMi);
   prefs.putUChar("bright", cfg.bright);
   prefs.putBool("walks", cfg.walks);
+  prefs.putUChar("theme", cfg.theme);
   lcd.setBrightness(cfg.bright);
   dirty = true;
 }
