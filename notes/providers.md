@@ -26,7 +26,7 @@
 
 ## Others
 - Suunto: partner program for companies only, "we do not provide this for personal use"; ~2 weeks response.
-- Wahoo Cloud API: request + approval per app.
+- Wahoo Cloud API: approved (production app "Next Mile Tracker"). OAuth at api.wahooligan.com/oauth/{authorize,token}, scopes user_read workouts_read offline_data, access token 2 h + rotating refresh token. GET /v1/workouts?per_page&page (newest first, no date filter), distance in workout_summary.distance_accum (string, m). Revoke: DELETE /v1/permissions. Limits per app: 200/5 min, 1000/h, 5000/day (token calls exempt); max 10 unrevoked tokens per user. Workouts recorded by third-party apps are not shared. Verified 2026-11-10 with Don's account: authorize, exchange, /v1/user, /v1/workouts (0 workouts), refresh, revoke all OK.
 - Coros: support site behind Cloudflare, unverified (believed partner application).
 - Apple: no web API -> iPhone Shortcut idea (untested). Samsung Health: Android SDK only. Amazfit: none found.
 
