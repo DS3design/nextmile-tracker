@@ -1,7 +1,8 @@
 """Laser-cut layered case for the ESP32-2432S028R (CYD), 3 mm basswood/plywood.
 
 Outputs case/nextmile_case.svg (all parts on one sheet). Red hairlines = cut, black fills = engrave.
-Board dimensions below are PLACEHOLDERS from typical CYD listings: measure your board and edit them.
+Board dimensions are from photos of Don's 2-USB boards (ESP32-2432S028, USB-C + micro-USB) against a tape measure,
+so they are good to about +/-1 mm. Do a cardboard test cut before cutting wood.
 """
 import os, math
 import numpy as np
@@ -22,19 +23,21 @@ ROOT = os.path.join(HERE, '..')
 T = 3.0          # sheet thickness
 KERF = 0.15      # beam width; outlines grow / holes shrink by KERF/2 so parts come out to size
 
-# ---- board (PLACEHOLDER, measure yours) ----
-PCB_W, PCB_H = 86.0, 50.0
+# ---- board (measured from photos, +/-1 mm), front view in landscape: display flex on the left, USB on the right ----
+PCB_W, PCB_H = 87.0, 50.5
 HOLE_D = 3.2                      # not used by the case bolts, the board floats in its pocket
-GLASS_W, GLASS_H, GLASS_X = 69.5, 50.0, 5.5    # display module outline, x from PCB left edge
+GLASS_W, GLASS_H, GLASS_X = 70.5, 50.5, 8.5    # display module outline, x from PCB left edge
 VIEW_W, VIEW_H = 58.5, 44.0       # visible screen area (2.8" panel is 57.6 x 43.2)
 VIEW_X = GLASS_X + (GLASS_W - VIEW_W) / 2 - 1.0
-USB_Y, USB_W = PCB_H / 2, 13.0    # USB port on the right short edge (looking at the screen)
-RST_X, RST_Y = PCB_W - 6.0, 9.0   # reset button, seen from the back
+USB_Y, USB_W = PCB_H / 2, 15.0    # USB-C on the right short edge, about centred (micro-USB stays covered)
+RST_X, RST_Y = 10.0, 10.0         # reset button (BOOT is just below it), front-view coordinates
+LDR_X, LDR_Y = 4.0, 39.5          # light sensor on the front, left of the glass
+LED_X, LED_Y = 29.0, 38.0         # RGB LED on the back, front-view coordinates
 
 # ---- case ----
 SIDE, TOP, BOTTOM = 8.0, 8.0, 18.0   # frame borders around the board; engraving lives in the bottom band
 R = 4.0                              # corner radius
-CLEAR = 0.4                          # play around board/glass
+CLEAR = 0.6                          # play around board/glass
 BOLT_D, BOLT_INSET = 3.3, 4.2        # M3 through-holes in the frame corners
 OUT_W, OUT_H = PCB_W + 2 * SIDE, PCB_H + TOP + BOTTOM
 BX, BY = SIDE, TOP                   # board origin inside the frame (y down)
@@ -147,11 +150,12 @@ def parts():
     eng = [trace(nm, dark, SIDE + 2, band_y - 1, 26, BOTTOM - 2),
            text_path('NEXT MILE TRACKER', OUT_W / 2 + 13, band_y + 6.5, 4.8),
            text_path('PACEGIVING 2026', OUT_W / 2 + 13, band_y + 13.0, 4.3)]
-    P.append(('1 FRONT', plate(window), eng))
+    ldr = Point(BX + LDR_X, BY + LDR_Y).buffer(1.75, 32)   # light sensor peeks through the frame
+    P.append(('1 FRONT', plate(window, [ldr]), eng))
 
     # 2 bezel: holds the display glass
     glass = box(BX + GLASS_X - CLEAR, BY - CLEAR, BX + GLASS_X + GLASS_W + CLEAR, BY + PCB_H + CLEAR)
-    P.append(('2 BEZEL', plate(glass), []))
+    P.append(('2 BEZEL', plate(glass, [ldr]), []))
 
     # 3 pocket + spacers: the board itself and parts on its back, with the USB notch
     pcb = box(BX - CLEAR, BY - CLEAR, BX + PCB_W + CLEAR, BY + PCB_H + CLEAR)
@@ -162,10 +166,11 @@ def parts():
     # back: reset pinhole, vents, DS3design logo + hint (engraved on the outside face, mirrored back view)
     rst = Point(OUT_W - (BX + RST_X), BY + RST_Y).buffer(1.2, 24)   # mirrored: we see the back from behind
     vents = [rrect(OUT_W / 2 - 25 + i * 10, BY + 8, 3, 22, 1.5) for i in range(6)]
-    eng = [trace(ds3, opaque, OUT_W / 2 - 26, BY + PCB_H - 13, 52, 18),
+    eng = [trace(ds3, opaque, OUT_W / 2 - 20, BY + PCB_H - 6, 40, 12),   # below the LED hole
            text_path('RESET', OUT_W - (BX + RST_X), BY + RST_Y + 6, 2.6),
            text_path('HOLD SCREEN 10 SEC TO ERASE & START OVER', OUT_W / 2, OUT_H - 6, 3.0, spacing=0.08)]
-    P.append((f'{4 + SPACERS} BACK', plate(None, [rst, *vents]), eng))
+    led = Point(OUT_W - (BX + LED_X), BY + LED_Y).buffer(2.5, 32)   # colored light shows through
+    P.append((f'{4 + SPACERS} BACK', plate(None, [rst, led, *vents]), eng))
 
     # stand feet: the case's bottom edge drops into a notch tilted TILT degrees back
     stack = T * (4 + SPACERS) + 0.3

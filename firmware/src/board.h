@@ -41,7 +41,7 @@ class LGFX : public lgfx::LGFX_Device {
       cfg.offset_rotation = 0;
       cfg.readable = true;
 #if defined(PANEL_ST7789)
-      cfg.invert = false;
+      cfg.invert = true;  // 2-USB (USB-C + micro) CYDs use an ST7789 that needs inversion
 #else
       cfg.invert = false;
 #endif
