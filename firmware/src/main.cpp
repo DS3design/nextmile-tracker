@@ -81,11 +81,15 @@ bool drawJpeg(uint8_t* buf, size_t len, int yOffset) {
   return true;
 }
 
-int32_t touchY = 0;
+int32_t touchX = 0, touchY = 0;
 
 bool touched() {
   int32_t x, y;
   if (!lcd.getTouch(&x, &y)) return false;
+#if defined(PANEL_ST7789)
+  y = lcd.height() - 1 - y;  // 2-USB boards: touch Y runs bottom-to-top
+#endif
+  touchX = x;
   touchY = y;
   return true;
 }
@@ -357,6 +361,9 @@ void handleTouch() {
     if (!pressed) {
       pressed = true;
       pressStart = now;
+      lgfx::touch_point_t raw;
+      lcd.getTouchRaw(&raw, 1);
+      Serial.printf("touch down x=%d y=%d raw=%d,%d\n", (int)touchX, (int)touchY, raw.x, raw.y);
       swallowTap = extras::screenOff();  // first touch in a dark room only lights the screen
       extras::wake();
       extras::dismiss();
@@ -376,8 +383,10 @@ void handleTouch() {
   if (pressed && now - lastTouch > 80) {  // XPT2046 drops out briefly mid-press; wait before calling it a release
     pressed = false;
     uint32_t held = lastTouch - pressStart;
+    Serial.printf("touch up held=%u ms\n", (unsigned)held);
     if (holdShown >= 0) {
       holdShown = -1;
+      shown = Screen::None;  // force a redraw, even of the WiFi setup screen
       dirty = true;
     } else if (held < TAP_MAX_MS && !swallowTap) {
       onTap();
@@ -544,6 +553,7 @@ void loop() {
 
   web::loop();
   maybeSync();
+  extras::setSetup(shown != Screen::Main && shown != Screen::Info && shown != Screen::None);
   extras::loop(netUp && !portalActive);
   updatePace();
   applyBacklight();
@@ -554,6 +564,11 @@ void loop() {
     dirty = true;
   }
 
+  static uint32_t dbgAt = 0;
+  if (millis() - dbgAt > 2000) {
+    dbgAt = millis();
+    Serial.printf("ldr=%d bl=%d pressed=%d screen=%d wifi=%d\n", extras::lightRaw(), blNow, pressed, (int)shown, (int)WiFi.status());
+  }
   handleTouch();
   if (holdShown < 0) {
     Screen want = baseScreen();

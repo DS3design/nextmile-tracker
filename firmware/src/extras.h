@@ -22,6 +22,7 @@ void newRun();
 void milestone();
 void dismiss();         // touch clears the new-run glow
 void setAhead(bool ahead);
+void setSetup(bool on);  // rainbow while the tracker is being set up
 
 // Weather
 const Weather& weather();

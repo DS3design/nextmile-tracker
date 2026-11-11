@@ -194,7 +194,7 @@ void main(lgfx::LovyanGFX& g, const UiData& d) {
     text(g, &f_label, WHITE, BLACK, top_left, left, bx, 141);
     text(g, &f_label, pct >= 1 ? RED : WHITE, BLACK, top_right, right, bx + bw, 141);
   } else {
-    text(g, &f_label, GREY, BLACK, top_left, "TAP THE SCREEN TO SET A YEARLY GOAL", bx, 141);
+    text(g, &f_label, GREY, BLACK, top_left, "TAP, THEN SCAN THE CODE TO SET A YEARLY GOAL", bx, 141);
   }
 
   // last run panel

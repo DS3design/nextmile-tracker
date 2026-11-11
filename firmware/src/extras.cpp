@@ -16,14 +16,21 @@ const int CH_R = 4, CH_G = 5, CH_B = 6;  // backlight uses LEDC channel 7
 const int DIM_ON = 250, DIM_OFF = 150, DARK_ON = 900, DARK_OFF = 600;
 const uint32_t DARK_OFF_AFTER_MS = 2UL * 60 * 1000, WAKE_MS = 30UL * 1000;
 const uint32_t WX_EVERY_MS = 30UL * 60 * 1000, WX_RETRY_MS = 10UL * 60 * 1000;
-const uint32_t NEWRUN_MS = 2UL * 60 * 60 * 1000, MILESTONE_MS = 60UL * 1000;
+const uint32_t NEWRUN_MS = 6UL * 60 * 60 * 1000, MILESTONE_MS = 60UL * 1000;
 
 float lightAvg = 0;
 bool lightInit = false, dim = false, dark = false;
 uint32_t lastLight = 0, darkSince = 0, wakeUntil = 0;
 
 uint32_t newRunAt = 0, milestoneAt = 0;
-bool newRunOn = false, milestoneOn = false, ahead = false;
+bool newRunOn = false, milestoneOn = false, ahead = false, setupMode = false;
+uint32_t lastAccent = 0, previewUntil = 0;
+
+uint32_t hsv(float h) {  // h 0..1, full saturation and value
+  float r = fabsf(h * 6 - 3) - 1, g = 2 - fabsf(h * 6 - 2), b = 2 - fabsf(h * 6 - 4);
+  auto c = [](float v) { return (uint32_t)(255 * (v < 0 ? 0 : v > 1 ? 1 : v)); };
+  return c(r) << 16 | c(g) << 8 | c(b);
+}
 uint32_t lastLed = 0;
 
 extras::Weather wx;
@@ -59,14 +66,20 @@ void ledLoop() {
   uint32_t now = millis();
   if (now - lastLed < 20) return;
   lastLed = now;
-  const uint8_t mode = app::cfg.led;  // 0 off, 1 events, 2 events + glow when ahead of goal pace
+  const uint8_t mode = app::cfg.led;  // 0 off, 1 glow after new miles, 2 always on
   if (milestoneOn && now - milestoneAt > MILESTONE_MS) milestoneOn = false;
   if (newRunOn && now - newRunAt > NEWRUN_MS) newRunOn = false;
   const uint32_t col = ui::accent();
+  if (col != lastAccent) {
+    if (lastAccent) previewUntil = now + 5000;  // show the new theme's colour
+    lastAccent = col;
+  }
+  if ((int32_t)(previewUntil - now) > 0) return ledWrite(col, 1.0f);
+  if (setupMode) return ledWrite(hsv((now % 12000) / 12000.0f), 0.6f);
   if (mode == 0 || (app::cfg.autoDim && dark)) return ledWrite(0, 0);
   if (milestoneOn) return ledWrite(col, (now / 150) % 2 ? 1.0f : 0.05f);
   if (newRunOn) return ledWrite(col, 0.1f + 0.9f * (0.5f - 0.5f * cosf(now * 2 * PI / 2500.0f)));
-  if (mode == 2 && ahead) return ledWrite(col, 0.15f);
+  if (mode == 2) return ledWrite(col, ahead ? 0.35f : 0.2f);
   ledWrite(0, 0);
 }
 
@@ -212,6 +225,7 @@ void milestone() {
 
 void dismiss() { newRunOn = milestoneOn = false; }
 void setAhead(bool a) { ahead = a; }
+void setSetup(bool on) { setupMode = on; }
 
 const Weather& weather() { return wx; }
 void locationChanged() { wantGeo = true; }

@@ -139,11 +139,9 @@ void handleRoot() {
   else if (app::cfg.placeName.length()) b += "<div class=dim>Showing weather for " + esc(app::cfg.placeName) + "</div>";
   b += F("<label class=row><input type=checkbox name=adim value=1");
   if (app::cfg.autoDim) b += F(" checked");
-  b += F("> Dim the screen in a dark room</label><label>Light on the back</label><select name=led>");
-  const char* ledOpts[] = {"Off", "Glow for new runs and milestones", "Also glow softly when ahead of goal pace"};
-  for (int i = 0; i < 3; i++)
-    b += "<option value=" + String(i) + (i == app::cfg.led ? " selected>" : ">") + ledOpts[i] + "</option>";
-  b += F("</select><div class=dim>The light uses your color theme.</div><button>Save</button></form>");
+  b += F("> Dim the screen in a dark room</label><label class=row><input type=checkbox name=ledon value=1");
+  if (app::cfg.led == 2) b += F(" checked");
+  b += F("> Keep the light on the back on all the time</label><div class=dim>Otherwise it glows for 6 hours after new miles and flashes on milestones. It uses your color theme.</div><button>Save</button></form>");
 
   b += F("<h2>More</h2><form method=post action=/sync><button class=ghost>Refresh miles now</button></form>"
          "<form method=post action=/update><button class=ghost>Check for software update</button></form>"
@@ -191,8 +189,7 @@ void handleSave() {
     extras::locationChanged();
   }
   c.autoDim = server.hasArg("adim");
-  int led = server.hasArg("led") ? server.arg("led").toInt() : c.led;
-  if (led >= 0 && led <= 2) c.led = led;
+  c.led = server.hasArg("ledon") ? 2 : 1;
   app::saveSettings();
   app::requestSync(resync);
   redirect("/");
