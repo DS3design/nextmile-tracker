@@ -44,9 +44,13 @@ int main() {
   UiData d3; strcpy(d3.athlete, "Alex R."); d3.year = 2027; d3.goal_mi = 0;
   ui::main(s, d3); save(s, "out/main_new_year_no_goal.ppm");
 
-  ui::wifiSetup(s, "NextMile-Setup", "https://ds3design.github.io/nextmile-tracker/setup/"); save(s, "out/setup_wifi.ppm");
-  ui::wifiSetup(s, "NextMile-Setup", "https://ds3design.github.io/nextmile-tracker/setup/", true); save(s, "out/setup_wifi_failed.ppm");
-  ui::wifiHelp(s, "NextMile-Setup"); save(s, "out/setup_wifi_help.ppm");
+  ui::WifiNet nets[] = {{"DS3DESIGN", -48, false}, {"Schomer-Home", -63, false}, {"NETGEAR-Guest-Network-Extended", -70, false}, {"xfinitywifi", -80, true}, {"Linksys", -85, false}};
+  ui::wifiList(s, nets, 5, 0, false, nullptr); save(s, "out/setup_wifi.ppm");
+  ui::wifiList(s, nets, 0, 0, true, nullptr); save(s, "out/setup_wifi_scanning.ppm");
+  ui::wifiList(s, nets, 5, 4, false, "Couldn't reach DS3DESIGN. Move closer to the router."); save(s, "out/setup_wifi_more.ppm");
+  ui::wifiPassword(s, "DS3DESIGN", "", 0, nullptr); save(s, "out/setup_wifi_keys.ppm");
+  ui::wifiPassword(s, "DS3DESIGN", "Running2026!", 2, "That password didn't work. Try again."); save(s, "out/setup_wifi_keys_sym.ppm");
+  ui::wifiPhone(s, "NextMile-Setup", false); save(s, "out/setup_wifi_phone.ppm");
   ui::wifiRetry(s, "Schomer-Home"); save(s, "out/wifi_retry.ppm");
   ui::linkStrava(s, "http://192.168.1.42/link", "192.168.1.42", false); save(s, "out/setup_strava.ppm");
   ui::message(s, "Loading your runs...", "Adding up this year's miles.", nullptr); save(s, "out/loading.ppm");

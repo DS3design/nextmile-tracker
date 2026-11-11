@@ -8,8 +8,9 @@
 #include <WiFiManager.h>
 #include <time.h>
 
+#include <algorithm>
+
 #include "app.h"
-#include "ble_setup.h"
 #include "board.h"
 #include "activities.h"
 #include "extras.h"
@@ -21,7 +22,7 @@
 
 namespace {
 
-enum class Screen { None, Portal, WifiHelp, Connecting, Clock, WifiRetry, Link, Main, Info, NotConfigured };
+enum class Screen { None, WifiList, WifiPass, WifiPhone, Joining, Connecting, Clock, WifiRetry, Link, Main, Info, NotConfigured };
 
 const uint32_t RECENT_EVERY_MS = 30UL * 60 * 1000;
 const uint32_t FULL_EVERY_MS = 24UL * 60 * 60 * 1000;
@@ -39,8 +40,15 @@ bool overlayInfo = false;
 uint32_t infoSince = 0;
 bool dirty = true;
 
-bool wifiHelpOn = false, wifiFailed = false, wifiTrying = false, bleJoining = false, bleFailed = false;
-uint32_t bleJoinAt = 0, bleEndAt = 0;
+bool wifiFailed = false, wifiTrying = false;
+// Touchscreen WiFi setup.
+enum class SetupView { List, Pass, Phone };
+SetupView setupView = SetupView::List;
+std::vector<ui::WifiNet> nets;
+int netFirst = 0, kbLayer = 0;
+bool scanning = false, joining = false;
+String pickSsid, pickPass, listErr, passErr;
+uint32_t joinAt = 0;
 bool portalActive = false, netUp = false, everConnected = false, wifiSaved = false;
 uint32_t wifiTryAt = 0;
 bool wantFull = true, wantRecent = false, wantPortal = false, wantReset = false, needRelink = false;
@@ -188,24 +196,47 @@ const char PORTAL_HEAD[] PROGMEM =
     "addEventListener('click',function(e){if(e.target.getAttribute&&e.target.getAttribute('data-ssid')!==null)"
     "setTimeout(function(){var p=document.getElementById('p');if(!p.disabled)p.focus()},50)});</script>";
 
+void startScan() {
+  WiFi.scanDelete();
+  scanning = WiFi.scanNetworks(true) != WIFI_SCAN_FAILED;
+  nets.clear();
+  netFirst = 0;
+  if (setupView == SetupView::List) shown = Screen::None;
+}
+
+void pollScan() {
+  if (!scanning) return;
+  const int n = WiFi.scanComplete();
+  if (n == WIFI_SCAN_RUNNING) return;
+  scanning = false;
+  for (int i = 0; i < n; i++) {
+    String id = WiFi.SSID(i);
+    if (!id.length()) continue;
+    auto it = std::find_if(nets.begin(), nets.end(), [&](const ui::WifiNet& w) { return id == w.ssid; });
+    if (it != nets.end()) {
+      it->rssi = max(it->rssi, (int)WiFi.RSSI(i));
+      continue;
+    }
+    ui::WifiNet w;
+    strlcpy(w.ssid, id.c_str(), sizeof w.ssid);
+    w.rssi = WiFi.RSSI(i);
+    w.open = WiFi.encryptionType(i) == WIFI_AUTH_OPEN;
+    nets.push_back(w);
+  }
+  std::sort(nets.begin(), nets.end(), [](const ui::WifiNet& a, const ui::WifiNet& b) { return a.rssi > b.rssi; });
+  WiFi.scanDelete();
+  Serial.printf("wifi scan: %d found\n", (int)nets.size());
+  if (setupView == SetupView::List) shown = Screen::None;
+}
+
 void startPortal() {
   wantPortal = false;
-  // Bluetooth's memory is handed back on normal boots, so setup needs a fresh start.
-  if (!blesetup::begin()) {
-    prefs.putBool("sboot", true);
-    ui::message(lcd, "Restarting...", "Getting ready for WiFi setup.", nullptr);
-    delay(800);
-    ESP.restart();
-  }
-  wifiHelpOn = wifiTrying = false;
-  wifiFailed = bleFailed;
-  bleFailed = false;
+  wifiTrying = false;
   web::stop();
   MDNS.end();
   netUp = false;
   overlayInfo = false;
-  ui::wifiSetup(lcd, AP_NAME, SETUP_URL, wifiFailed);
-  shown = Screen::Portal;
+  shown = Screen::None;
   wm.setConfigPortalBlocking(false);
   wm.setConnectTimeout(20);
   wm.setCaptivePortalEnable(true);
@@ -216,7 +247,6 @@ void startPortal() {
   wm.setCustomHeadElement(PORTAL_HEAD);
   wm.setPreSaveConfigCallback([] {
     wifiTrying = true;
-    wifiHelpOn = false;
     lcd.startWrite();
     ui::message(lcd, "Connecting...", "Joining your home WiFi.", "This takes about 20 seconds.");
     lcd.endWrite();
@@ -230,17 +260,12 @@ void startPortal() {
   wm.setMenu(menu);
   wm.startConfigPortal(AP_NAME);
   portalActive = true;
+  startScan();
 }
 
-// An Android phone sent the home WiFi over Bluetooth.
-void startBleJoin(const String& ssid, const String& pass) {
-  Serial.printf("ble join %s\n", ssid.c_str());
-  blesetup::setState("joining");
-  wifiHelpOn = false;
-  lcd.startWrite();
-  ui::message(lcd, "Connecting...", "Joining your home WiFi.", "This takes about 20 seconds.");
-  lcd.endWrite();
-  shown = Screen::None;
+void joinWifi(const String& ssid, const String& pass) {
+  Serial.printf("joining %s\n", ssid.c_str());
+  pickSsid = ssid;
   if (portalActive) {
     wm.stopConfigPortal();
     portalActive = false;
@@ -248,29 +273,89 @@ void startBleJoin(const String& ssid, const String& pass) {
   WiFi.mode(WIFI_STA);
   WiFi.persistent(true);
   WiFi.begin(ssid.c_str(), pass.c_str());
-  bleJoining = true;
-  bleJoinAt = millis();
+  joining = true;
+  joinAt = millis();
 }
 
-void checkBleJoin() {
+void checkJoin() {
   const wl_status_t st = WiFi.status();
-  const uint32_t since = millis() - bleJoinAt;
+  const uint32_t since = millis() - joinAt;
   if (st == WL_CONNECTED) {
-    bleJoining = false;
+    joining = false;
     wifiSaved = true;
-    String ok = "ok|" + WiFi.localIP().toString();
-    blesetup::setState(ok.c_str());
-    bleEndAt = millis() + 6000;  // let the phone read the result before Bluetooth goes off
+    pickPass = "";
     return;
   }
   const bool bad = (st == WL_CONNECT_FAILED || st == WL_NO_SSID_AVAIL) && since > 6000;
   if (!bad && since < 25000) return;
-  bleJoining = false;
-  blesetup::setState(st == WL_NO_SSID_AVAIL ? "notfound" : "badpw");
+  joining = false;
   WiFi.disconnect(false, true);  // don't keep a password that didn't work
   wifiSaved = false;
-  bleFailed = true;
-  wantPortal = true;
+  Serial.printf("join failed (status %d)\n", (int)st);
+  startPortal();
+  if (st == WL_NO_SSID_AVAIL) {
+    listErr = "Couldn't reach " + pickSsid + ". Try again.";
+  } else {
+    passErr = "Wrong password. Try again.";
+    setupView = SetupView::Pass;
+  }
+}
+
+void setupTap() {
+  if (setupView == SetupView::List) {
+    const int hit = ui::wifiListHit(touchX, touchY, nets.size(), netFirst);
+    if (hit >= 0) {
+      const ui::WifiNet& w = nets[hit];
+      listErr = "";
+      if (w.open) return joinWifi(w.ssid, "");
+      if (pickSsid != w.ssid) pickPass = "";
+      pickSsid = w.ssid;
+      passErr = "";
+      kbLayer = 0;
+      setupView = SetupView::Pass;
+    } else if (hit == ui::LIST_AGAIN) {
+      listErr = "";
+      startScan();
+    } else if (hit == ui::LIST_MORE) {
+      netFirst += ui::NET_ROWS;
+      if (netFirst >= (int)nets.size()) netFirst = 0;
+      shown = Screen::None;
+    } else if (hit == ui::LIST_PHONE) {
+      setupView = SetupView::Phone;
+    }
+    return;
+  }
+  if (setupView == SetupView::Phone) {
+    if (touchY >= 196) setupView = SetupView::List;
+    return;
+  }
+  const int k = ui::wifiKeyHit(touchX, touchY, kbLayer);
+  if (k == ui::KB_NONE) return;
+  if (k == ui::KB_BACK) {
+    setupView = SetupView::List;
+    return;
+  }
+  if (k == ui::KB_OK) {
+    if (pickPass.length()) joinWifi(pickSsid, pickPass);
+    return;
+  }
+  lcd.startWrite();
+  ui::wifiKeyFlash(lcd, touchX, touchY, kbLayer, true);
+  lcd.endWrite();
+  delay(70);
+  const int was = kbLayer;
+  if (k == ui::KB_SHIFT) kbLayer = kbLayer == 1 ? 0 : 1;
+  else if (k == ui::KB_SYM) kbLayer = kbLayer == 2 ? 0 : 2;
+  else if (k == ui::KB_DEL) pickPass.remove(pickPass.length() ? pickPass.length() - 1 : 0);
+  else if (pickPass.length() < 63) {
+    pickPass += (char)k;
+    if (kbLayer == 1) kbLayer = 0;  // shift is for one letter, like a phone keyboard
+  }
+  lcd.startWrite();
+  if (kbLayer != was) ui::wifiKeyboard(lcd, kbLayer);
+  else ui::wifiKeyFlash(lcd, touchX, touchY, kbLayer, false);
+  ui::wifiPasswordField(lcd, pickPass.c_str());
+  lcd.endWrite();
 }
 
 void factoryReset() {
@@ -405,7 +490,9 @@ void maybeOta() {
 }
 
 Screen baseScreen() {
-  if (portalActive) return wifiHelpOn ? Screen::WifiHelp : Screen::Portal;
+  if (joining) return Screen::Joining;
+  if (portalActive)
+    return setupView == SetupView::Pass ? Screen::WifiPass : setupView == SetupView::Phone ? Screen::WifiPhone : Screen::WifiList;
   bool showData = src::linked() && !needRelink;
   if (showData && overlayInfo && netUp) return Screen::Info;
   if (showData) return Screen::Main;
@@ -424,8 +511,10 @@ void draw(Screen s) {
     case Screen::WifiRetry: ui::wifiRetry(lcd, WiFi.SSID().c_str()); break;
     case Screen::Connecting: ui::message(lcd, "Connecting...", "Joining your WiFi.", nullptr); break;
     case Screen::Clock: ui::message(lcd, "Connected!", "Setting the clock...", nullptr); break;
-    case Screen::Portal: ui::wifiSetup(lcd, AP_NAME, SETUP_URL, wifiFailed); break;
-    case Screen::WifiHelp: ui::wifiHelp(lcd, AP_NAME); break;
+    case Screen::WifiList: ui::wifiList(lcd, nets.data(), nets.size(), netFirst, scanning, listErr.c_str()); break;
+    case Screen::WifiPass: ui::wifiPassword(lcd, pickSsid.c_str(), pickPass.c_str(), kbLayer, passErr.c_str()); break;
+    case Screen::WifiPhone: ui::wifiPhone(lcd, AP_NAME, wifiFailed); break;
+    case Screen::Joining: ui::message(lcd, "Connecting...", ("Joining " + pickSsid + ".").c_str(), "This takes about 20 seconds."); break;
     case Screen::NotConfigured:
       ui::message(lcd, "Almost ready", "This tracker is missing its Strava keys.", "Contact DS3design to finish setup.");
       break;
@@ -461,8 +550,9 @@ void onTap() {
       }
       break;
     case Screen::WifiRetry: wantPortal = true; break;
-    case Screen::Portal: wifiHelpOn = true; break;
-    case Screen::WifiHelp: wifiHelpOn = false; break;
+    case Screen::WifiList:
+    case Screen::WifiPass:
+    case Screen::WifiPhone: setupTap(); return;
     default: break;
   }
   dirty = true;
@@ -663,9 +753,6 @@ void setup() {
   WiFi.setHostname("nextmile");
   WiFi.setAutoReconnect(true);
   const bool haveWifi = wm.getWiFiIsSaved();
-  const bool setupBoot = prefs.getBool("sboot", false);
-  if (setupBoot) prefs.remove("sboot");
-  if (haveWifi && !setupBoot) blesetup::releaseUnused();
   wifiSaved = haveWifi;
   if (haveWifi) WiFi.begin();  // connects in the background while the intro plays
   wifiTryAt = millis();
@@ -673,7 +760,7 @@ void setup() {
   playIntro();
   splash();
 
-  if (!haveWifi || setupBoot) wantPortal = true;
+  if (!haveWifi) wantPortal = true;
   draw(baseScreen());
   applyBacklight();
 }
@@ -682,27 +769,24 @@ void loop() {
   if (wantReset) factoryReset();
   if (wantPortal) startPortal();
 
-  blesetup::loop();
-  String bs, bp;
-  if (blesetup::takeCreds(bs, bp)) startBleJoin(bs, bp);
-  if (bleJoining) checkBleJoin();
-  if (bleEndAt && (int32_t)(millis() - bleEndAt) > 0) {
-    bleEndAt = 0;
-    blesetup::end();
-  }
+  pollScan();
+  if (joining) checkJoin();
 
   if (portalActive) {
     wm.process();
     if (!wm.getConfigPortalActive()) portalActive = false;
     if (wifiTrying) {  // a password was submitted on the phone and the join attempt just finished
       wifiTrying = false;
-      if (portalActive && WiFi.status() != WL_CONNECTED) wifiFailed = true;
+      if (portalActive && WiFi.status() != WL_CONNECTED) {
+        wifiFailed = true;
+        shown = Screen::None;
+      }
     }
     if (WiFi.status() == WL_CONNECTED && !portalActive) dirty = true;
   }
 
   // Routers often refuse the first join right after a restart, and the ESP32 doesn't retry that on its own.
-  if (!portalActive && wifiSaved && !bleJoining) {
+  if (!portalActive && wifiSaved && !joining) {
     const wl_status_t st = WiFi.status();
     const uint32_t since = millis() - wifiTryAt;
     if (st != WL_CONNECTED && (st == WL_CONNECT_FAILED || st == WL_NO_SSID_AVAIL ? since > 4000 : since > 20000)) {
@@ -743,7 +827,7 @@ void loop() {
   handleTouch();
   if (holdShown < 0) {
     Screen want = baseScreen();
-    if (want != shown || (dirty && want != Screen::Portal && want != Screen::WifiHelp)) draw(want);
+    if (want != shown || (dirty && want != Screen::WifiList && want != Screen::WifiPass && want != Screen::WifiPhone)) draw(want);
   }
   delay(10);
 }

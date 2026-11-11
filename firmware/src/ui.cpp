@@ -276,30 +276,163 @@ void main(lgfx::LovyanGFX& g, const UiData& d) {
   if (d.sync_error) g.fillCircle(312, 232, 3, c(g, RED));
 }
 
-void wifiSetup(lgfx::LovyanGFX& g, const char* apName, const char* setupUrl, bool failed) {
-  g.fillScreen(c(g, BLACK));
-  header(g, "Welcome!", true);
-  text(g, &f_label, RED, BLACK, top_left, failed ? "THAT DIDN'T CONNECT. TRY AGAIN." : "STEP 1 OF 2  -  YOUR HOME WIFI", 12, 46);
-  text(g, &f_body, WHITE, BLACK, top_center, "Point your phone's camera at your code:", 160, 64);
-  qr(g, setupUrl, 34, 88, 92);
-  char wifiQr[64];
-  snprintf(wifiQr, sizeof wifiQr, "WIFI:T:nopass;S:%s;;", apName);
-  qr(g, wifiQr, 194, 88, 92);
-  text(g, &f_mid, WHITE, BLACK, top_center, "ANDROID", 80, 184);
-  text(g, &f_mid, WHITE, BLACK, top_center, "IPHONE", 240, 184);
-  text(g, &f_body, GREY, BLACK, top_center, "Need help? Tap here.", 160, 216);
+namespace {
+const int LIST_Y = 64, ROW_H = 36, BTN_Y = 206, BTN_H = 28;
+const int KB_Y = 56, KEY_H = 36, KB_BOTTOM_Y = 200;
+const char* const KB_ROWS[3][4] = {
+    {"1234567890", "qwertyuiop", "asdfghjkl@", "zxcvbnm.-_"},
+    {"1234567890", "QWERTYUIOP", "ASDFGHJKL@", "ZXCVBNM.-_"},
+    {"!#$%^&*()+", "=[]{}\\|;:'", "\"<>,?/~`", "0123456789"},
+};
+struct Key { int x, y, w, h, code; };
+// Bottom row: shift, symbols, space, delete, connect.
+const Key KB_BOTTOM[] = {{0, KB_BOTTOM_Y, 64, 38, ui::KB_SHIFT}, {64, KB_BOTTOM_Y, 60, 38, ui::KB_SYM},
+                         {124, KB_BOTTOM_Y, 76, 38, ' '}, {200, KB_BOTTOM_Y, 52, 38, ui::KB_DEL},
+                         {252, KB_BOTTOM_Y, 68, 38, ui::KB_OK}};
+
+void button(lgfx::LovyanGFX& g, int x, int y, int w, int h, const char* label, uint32_t bg, uint32_t fg) {
+  g.fillRoundRect(x, y, w, h, 6, c(g, bg));
+  text(g, &f_label, fg, bg, middle_center, label, x + w / 2, y + h / 2);
 }
 
-void wifiHelp(lgfx::LovyanGFX& g, const char* apName) {
+bool keyAt(int x, int y, int layer, Key& k) {
+  if (y >= KB_BOTTOM_Y) {
+    for (const Key& b : KB_BOTTOM)
+      if (x >= b.x && x < b.x + b.w) return k = b, true;
+    return false;
+  }
+  if (y < KB_Y) return false;
+  int r = (y - KB_Y) / KEY_H;
+  if (r > 3) return false;
+  const char* row = KB_ROWS[layer][r];
+  int n = strlen(row), w = 320 / n, x0 = (320 - w * n) / 2;
+  int i = (x - x0) / w;
+  if (x < x0 || i >= n) return false;
+  k = {x0 + i * w, KB_Y + r * KEY_H, w, KEY_H, row[i]};
+  return true;
+}
+
+void drawKey(lgfx::LovyanGFX& g, const Key& k, int layer, bool down) {
+  const char* label;
+  char ch[2] = {(char)k.code, 0};
+  switch (k.code) {
+    case ui::KB_SHIFT: label = layer == 1 ? "abc" : "ABC"; break;
+    case ui::KB_SYM: label = layer == 2 ? "abc" : "#+="; break;
+    case ui::KB_DEL: label = "DEL"; break;
+    case ui::KB_OK: label = "CONNECT"; break;
+    case ' ': label = "SPACE"; break;
+    default: label = ch;
+  }
+  bool special = k.code < 0 || k.code == ' ';
+  uint32_t bg = down ? WHITE : k.code == ui::KB_OK ? RED : (special || (k.code == ui::KB_SHIFT && layer == 1)) ? TRACK : PANEL;
+  uint32_t fg = down ? BLACK : (k.code == ui::KB_OK ? 0xFFFFFF : WHITE);
+  g.fillRoundRect(k.x + 1, k.y + 1, k.w - 2, k.h - 2, 4, c(g, bg));
+  text(g, special ? &f_label : &f_mid, fg, bg, middle_center, label, k.x + k.w / 2, k.y + k.h / 2);
+}
+}  // namespace
+
+void wifiList(lgfx::LovyanGFX& g, const WifiNet* nets, int n, int first, bool scanning, const char* error) {
   g.fillScreen(c(g, BLACK));
-  header(g, "Need help?", true);
-  int y = wrap(g, &f_body, WHITE, 12, 44, 296, 19,
-               "ANDROID: scan the left code. A page opens. Tap Find my tracker and follow the steps.");
-  char s[128];
-  snprintf(s, sizeof s, "IPHONE: scan the right code and tap Join. The setup page opens by itself.");
-  y = wrap(g, &f_body, WHITE, 12, y + 10, 296, 19, s);
-  wrap(g, &f_body, GREY, 12, y + 10, 296, 19, "Keep your phone close to the tracker.");
-  text(g, &f_body, GREY, BLACK, top_center, "Tap the screen to go back.", 160, 216);
+  header(g, "Welcome!", true);
+  char e[64];
+  upper(e, sizeof e, error && *error ? error : "Step 1 of 2  -  tap your home WiFi");
+  fit(g, &f_label, e, 296);
+  text(g, &f_label, RED, BLACK, top_left, e, 12, 44);
+  if (scanning) {
+    text(g, &f_mid, WHITE, BLACK, top_center, "Looking for WiFi...", 160, 104);
+    text(g, &f_body, GREY, BLACK, top_center, "This takes a few seconds.", 160, 136);
+  } else if (n == 0) {
+    text(g, &f_mid, WHITE, BLACK, top_center, "No WiFi found.", 160, 104);
+    text(g, &f_body, GREY, BLACK, top_center, "Tap Look again.", 160, 136);
+  }
+  for (int i = 0; !scanning && i < NET_ROWS && first + i < n; i++) {
+    const WifiNet& w = nets[first + i];
+    int y = LIST_Y + i * ROW_H;
+    g.fillRoundRect(12, y, 296, ROW_H - 4, 6, c(g, PANEL));
+    char name[40];
+    strncpy(name, w.ssid, sizeof name - 1);
+    name[sizeof name - 1] = 0;
+    fit(g, &f_mid, name, 240);
+    text(g, &f_mid, WHITE, PANEL, middle_left, name, 22, y + (ROW_H - 4) / 2);
+    int bars = w.rssi > -60 ? 3 : w.rssi > -72 ? 2 : 1;
+    for (int b = 0; b < 3; b++) g.fillRect(278 + b * 7, y + 22 - b * 5 - 6, 5, b * 5 + 6, c(g, b < bars ? WHITE : DIM));
+  }
+  button(g, 12, BTN_Y, 92, BTN_H, "LOOK AGAIN", TRACK, WHITE);
+  if (!scanning && n > NET_ROWS) button(g, 114, BTN_Y, 92, BTN_H, first + NET_ROWS < n ? "MORE WIFI" : "BACK TO TOP", TRACK, WHITE);
+  button(g, 216, BTN_Y, 92, BTN_H, "USE MY PHONE", TRACK, WHITE);
+}
+
+int wifiListHit(int x, int y, int n, int first) {
+  if (y >= BTN_Y - 6) {
+    if (x < 109) return LIST_AGAIN;
+    if (x < 211) return n > NET_ROWS ? LIST_MORE : LIST_NONE;
+    return LIST_PHONE;
+  }
+  if (y < LIST_Y - 2) return LIST_NONE;
+  int i = (y - LIST_Y) / ROW_H;
+  return i < NET_ROWS && first + i < n ? first + i : LIST_NONE;
+}
+
+void wifiPasswordField(lgfx::LovyanGFX& g, const char* pass) {
+  g.fillRoundRect(4, 24, 312, 30, 5, c(g, PANEL));
+  g.setFont(&f_mid);
+  if (!*pass) {
+    text(g, &f_body, DIM, PANEL, middle_left, "Type your WiFi password", 12, 39);
+    g.fillRect(11, 29, 2, 20, c(g, RED));
+    return;
+  }
+  const char* p = pass;
+  while (*p && g.textWidth(p) > 290) p++;  // show the end while typing a long one
+  text(g, &f_mid, WHITE, PANEL, middle_left, p, 12, 39);
+  g.fillRect(14 + g.textWidth(p), 29, 2, 20, c(g, RED));
+}
+
+void wifiKeyboard(lgfx::LovyanGFX& g, int layer) {
+  g.fillRect(0, KB_Y, 320, 240 - KB_Y, c(g, BLACK));
+  for (int r = 0; r < 4; r++) {
+    const char* row = KB_ROWS[layer][r];
+    int n = strlen(row), w = 320 / n, x0 = (320 - w * n) / 2;
+    for (int i = 0; i < n; i++) drawKey(g, {x0 + i * w, KB_Y + r * KEY_H, w, KEY_H, row[i]}, layer, false);
+  }
+  for (const Key& b : KB_BOTTOM) drawKey(g, b, layer, false);
+}
+
+void wifiPassword(lgfx::LovyanGFX& g, const char* ssid, const char* pass, int layer, const char* error) {
+  g.fillScreen(c(g, BLACK));
+  button(g, 2, 1, 58, 20, "< BACK", TRACK, WHITE);
+  char t[64];
+  if (error && *error) {
+    upper(t, sizeof t, error);
+  } else {
+    snprintf(t, sizeof t, "PASSWORD FOR %s", ssid);
+  }
+  fit(g, &f_label, t, 250);
+  text(g, &f_label, error && *error ? RED : GREY, BLACK, top_left, t, 68, 3);
+  wifiPasswordField(g, pass);
+  wifiKeyboard(g, layer);
+}
+
+int wifiKeyHit(int x, int y, int layer) {
+  if (y < 22) return x < 70 ? KB_BACK : KB_NONE;
+  Key k;
+  return keyAt(x, y, layer, k) ? k.code : KB_NONE;
+}
+
+void wifiKeyFlash(lgfx::LovyanGFX& g, int x, int y, int layer, bool down) {
+  Key k;
+  if (keyAt(x, y, layer, k)) drawKey(g, k, layer, down);
+}
+
+void wifiPhone(lgfx::LovyanGFX& g, const char* apName, bool failed) {
+  g.fillScreen(c(g, BLACK));
+  header(g, "Use your phone", true);
+  text(g, &f_label, RED, BLACK, top_left, failed ? "THAT DIDN'T CONNECT. TRY AGAIN." : "STEP 1 OF 2  -  YOUR HOME WIFI", 12, 44);
+  char wifiQr[64];
+  snprintf(wifiQr, sizeof wifiQr, "WIFI:T:nopass;S:%s;;", apName);
+  qr(g, wifiQr, 18, 74, 104);
+  int y = wrap(g, &f_body, WHITE, 140, 68, 172, 19, "Open your phone's camera, point it at this code, and tap Join.");
+  wrap(g, &f_body, GREY, 140, y + 8, 172, 19, "A page opens to pick your home WiFi.");
+  button(g, 12, BTN_Y, 296, BTN_H, "BACK TO THE WIFI LIST", TRACK, WHITE);
 }
 
 void wifiRetry(lgfx::LovyanGFX& g, const char* ssid) {

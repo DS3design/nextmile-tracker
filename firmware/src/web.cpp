@@ -356,11 +356,10 @@ void handleUpdate() {
 }
 
 void handleWifi() {
-  sendPage("Change WiFi", "<p>The tracker now shows a code for WiFi setup.</p><ol>"
-                          "<li>Point your phone's camera at the code on the tracker and tap <b>Join</b>. "
-                          "(Or join <b>" AP_NAME "</b> in your phone's WiFi settings.)</li>"
-                          "<li>A setup page opens. If it doesn't, open your browser and go to <b>4.3.2.1</b>.</li>"
-                          "<li>Tap <b>Choose my home WiFi</b>, tap your WiFi name and type its password.</li></ol>");
+  sendPage("Change WiFi", "<p>Look at the tracker's screen. It now shows the WiFi networks it can see.</p><ol>"
+                          "<li>Tap your home WiFi on the tracker's screen.</li>"
+                          "<li>Type the WiFi password on the tracker's keyboard and tap <b>Connect</b>.</li></ol>"
+                          "<p class=dim>Or tap <b>Use my phone</b> on the tracker and scan the code.</p>");
   app::requestPortal();
 }
 

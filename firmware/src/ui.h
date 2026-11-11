@@ -41,8 +41,19 @@ void setTheme(int i);
 uint32_t accent();  // current theme's accent colour, 0xRRGGBB
 void init();
 void main(lgfx::LovyanGFX& g, const UiData& d);
-void wifiSetup(lgfx::LovyanGFX& g, const char* apName, const char* setupUrl, bool failed = false);
-void wifiHelp(lgfx::LovyanGFX& g, const char* apName);
+// WiFi setup on the touchscreen: a list of nearby WiFi, then an on-screen keyboard for the password.
+struct WifiNet { char ssid[33]; int rssi; bool open; };
+constexpr int NET_ROWS = 4;
+enum { LIST_NONE = -1, LIST_AGAIN = -2, LIST_MORE = -3, LIST_PHONE = -4 };
+enum { KB_NONE = 0, KB_SHIFT = -1, KB_SYM = -2, KB_DEL = -3, KB_OK = -4, KB_BACK = -5 };
+void wifiList(lgfx::LovyanGFX& g, const WifiNet* nets, int n, int first, bool scanning, const char* error);
+int wifiListHit(int x, int y, int n, int first);  // net index, or LIST_*
+void wifiPassword(lgfx::LovyanGFX& g, const char* ssid, const char* pass, int layer, const char* error);
+void wifiPasswordField(lgfx::LovyanGFX& g, const char* pass);
+void wifiKeyboard(lgfx::LovyanGFX& g, int layer);  // layer 0 lower, 1 upper, 2 symbols
+int wifiKeyHit(int x, int y, int layer);            // character, or KB_*
+void wifiKeyFlash(lgfx::LovyanGFX& g, int x, int y, int layer, bool down);
+void wifiPhone(lgfx::LovyanGFX& g, const char* apName, bool failed);  // WiFi code for the phone setup page
 void wifiRetry(lgfx::LovyanGFX& g, const char* ssid);
 void linkStrava(lgfx::LovyanGFX& g, const char* url, const char* ip, bool relink);
 void message(lgfx::LovyanGFX& g, const char* title, const char* line1, const char* line2);
