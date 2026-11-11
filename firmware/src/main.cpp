@@ -237,6 +237,8 @@ void updatePace() {
   extras::setAhead(d.goal_mi > 0 && d.ytd_m / 1609.344f >= d.goal_mi * frac);
 }
 
+bool reloadAll = false;  // settings changed what counts, so the year is re-read from scratch
+
 void drawLoading() {
   ui::message(lcd, "Loading your miles...", "Adding up this year so far.", "This can take a minute.");
   shown = Screen::None;
@@ -266,9 +268,8 @@ void maybeSync() {
   bool lastYear = t.lastYear != y - 1;
   if (!full && !recent && !lastYear) return;
 
-  if (t.year == 0 && shown != Screen::Info) {
-    drawLoading();
-  }
+  if ((t.year == 0 || reloadAll) && shown != Screen::Info) drawLoading();
+  reloadAll = false;
   src::Result r = src::OK;
   syncing = true;
   if (full || recent) r = src::sync(y, full, app::cfg.kinds);
@@ -475,7 +476,7 @@ void applyTz() {
 }
 
 void requestSync(bool full) {
-  if (full) wantFull = true, bootSync = false;
+  if (full) wantFull = reloadAll = true, bootSync = false;
   else wantRecent = true;
   backoffUntil = 0;
   dirty = true;

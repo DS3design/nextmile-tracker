@@ -345,7 +345,7 @@ void handleExchange() {
 }
 
 void handleSync() {
-  app::requestSync(false);
+  app::requestSync(true);
   redirect("/");
 }
 

@@ -658,13 +658,19 @@ const char* corosName(int code) {
     case 102: return "Trail Run";
     case 103: return "Track Run";
     case 104: return "Hike";
+    case 900: return "Walk";
     default: return nullptr;
   }
 }
 
-// querySportRecords answers in text:
-//   1. Trail Run(102) — 2026-10-03
-//      Duration: 2:12:38 | Distance: 12.03 km
+bool corosCounts(int code, const char* label, uint8_t kinds) {
+  return ((kinds & 1) && code >= 100 && code <= 103) || ((kinds & 2) && (code == 104 || code == 900)) || isRun(label, kinds);
+}
+
+// querySportRecords answers in text (older answers put the sport code in parentheses):
+//   1. Walk — 2026-10-12
+//      Duration: 1:25:48 | Distance: 5.62 km
+//      LabelId: 480997372470525956 | SportType: 900
 void parseCoros(const String& t, uint8_t kinds, std::vector<Act>& out) {
   std::vector<String> keys;
   size_t first = out.size();
@@ -700,9 +706,9 @@ void parseCoros(const String& t, uint8_t kinds, std::vector<Act>& out) {
       if ((int)line.length() > di + 15 && line[di + 10] == ' ' && isdigit(line[di + 11])) when += " " + line.substring(di + 11, di + 16) + ":00";
       x.local = acts::parseIso(when.c_str());
       x.year = atoi(when.c_str());
-      x.counts = ((kinds & 1) && code >= 100 && code <= 103) || ((kinds & 2) && code == 104) || isRun(label, kinds);
       const char* known = corosName(code);
       strlcpy(x.name, known ? known : (label.length() ? label.c_str() : "Run"), sizeof x.name);
+      x.counts = corosCounts(code, x.name, kinds);
       out.push_back(x);
       keys.push_back(line);
       open = true;
@@ -720,7 +726,13 @@ void parseCoros(const String& t, uint8_t kinds, std::vector<Act>& out) {
       while (*end == ' ') end++;
       x.m = strncmp(end, "km", 2) == 0 ? v * 1000 : strncmp(end, "mi", 2) == 0 ? v * 1609.344f : v;
     }
-    if (d >= 0 || m >= 0) keys.back() += "|" + line;
+    int st = line.indexOf("SportType:");
+    if (st >= 0) {
+      int code = line.substring(st + 10).toInt();
+      if (const char* known = corosName(code)) strlcpy(x.name, known, sizeof x.name);
+      x.counts = corosCounts(code, x.name, kinds);
+    }
+    if (d >= 0 || m >= 0 || line.startsWith("LabelId:")) keys.back() += "|" + line;
   }
   for (size_t i = 0; i < keys.size(); i++) out[first + i].id = hash64(keys[i].c_str());
 }
@@ -734,8 +746,18 @@ src::Result corosRecords(const String& from, const String& to, uint8_t kinds, st
   JsonObject res = d["result"];
   if (res["isError"] | false) return src::NET;
   String text;
-  for (JsonObject c : res["content"].as<JsonArray>()) text += String(c["text"] | "") + "\n";
+  for (JsonObject c : res["content"].as<JsonArray>()) {
+    String part = c["text"] | "";
+    part.trim();
+    if (part.startsWith("\"")) {  // the text comes JSON-encoded a second time, with \n escapes
+      JsonDocument s;
+      if (!deserializeJson(s, part) && s.is<const char*>()) part = s.as<const char*>();
+    }
+    text += part + "\n";
+  }
+  size_t before = out.size();
   parseCoros(text, kinds, out);
+  Serial.printf("coros %s-%s: %u records\n", from.c_str(), to.c_str(), (unsigned)(out.size() - before));
   return src::OK;
 }
 
@@ -745,7 +767,7 @@ String ymdc(int y, int m, int d) {
   return b;
 }
 
-// Half-month windows (50 records each) from `from` through `to`, local dates.
+// Month windows (50 records each, split in half when full) from `from` through `to`, local dates.
 src::Result fetchCoros(time_t from, time_t to, uint8_t kinds, std::vector<Act>& out) {
   src::Result r = ensureToken(false);
   if (r != src::OK) return r;
@@ -758,15 +780,20 @@ src::Result fetchCoros(time_t from, time_t to, uint8_t kinds, std::vector<Act>& 
   struct tm a, b;
   localtime_r(&from, &a);
   localtime_r(&to, &b);
-  int y = a.tm_year + 1900, mo = a.tm_mon + 1, half = a.tm_mday > 15;
-  const int ey = b.tm_year + 1900, em = b.tm_mon + 1, ehalf = b.tm_mday > 15;
-  while (y < ey || (y == ey && (mo < em || (mo == em && half <= ehalf)))) {
+  int y = a.tm_year + 1900, mo = a.tm_mon + 1;
+  const int ey = b.tm_year + 1900, em = b.tm_mon + 1;
+  while (y < ey || (y == ey && mo <= em)) {
     static const uint8_t days[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
     int last = days[mo - 1] + (mo == 2 && ((y % 4 == 0 && y % 100) || y % 400 == 0));
-    r = corosRecords(ymdc(y, mo, half ? 16 : 1), ymdc(y, mo, half ? last : 15), kinds, out);
+    const size_t n = out.size();
+    r = corosRecords(ymdc(y, mo, 1), ymdc(y, mo, last), kinds, out);
+    if (r == src::OK && out.size() - n >= 50) {
+      out.resize(n);
+      r = corosRecords(ymdc(y, mo, 1), ymdc(y, mo, 15), kinds, out);
+      if (r == src::OK) r = corosRecords(ymdc(y, mo, 16), ymdc(y, mo, last), kinds, out);
+    }
     if (r != src::OK) return r;
-    if (half && ++mo > 12) mo = 1, y++;
-    half = !half;
+    if (++mo > 12) mo = 1, y++;
   }
   return src::OK;
 }
