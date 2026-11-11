@@ -207,8 +207,22 @@ def pack(P, gap=3.0, label=5.0):
     return sheets
 
 
-def write(sheet, dst):
-    W = H = SHEET
+BED = 220.0    # xTool F2 Ultra work area; single-piece files are centered on it, where the beam is straightest
+
+
+def centered(name, polys, eng, gap=3.0):
+    """One piece (or a set of identical small ones side by side) in the middle of the bed."""
+    w = sum(p.bounds[2] - p.bounds[0] for p in polys) + gap * (len(polys) - 1)
+    h = max(p.bounds[3] - p.bounds[1] for p in polys)
+    x, y, out = (BED - w) / 2, (BED - h) / 2, []
+    for p in polys:
+        out.append((name, p, eng, x - p.bounds[0], y - p.bounds[1]))
+        x += p.bounds[2] - p.bounds[0] + gap
+    return out
+
+
+def write(sheet, dst, W=SHEET):
+    H = W
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W:.0f}mm" height="{H:.0f}mm" viewBox="0 0 {W:.0f} {H:.0f}">',
            '<!-- Next Mile Tracker case. Red = cut, black = engrave. Grey labels are notes: hide or delete before cutting. -->',
            '<g id="notes" fill="#999999" font-family="sans-serif" font-size="3.2">']
@@ -231,6 +245,15 @@ def main():
         dst = os.path.join(ROOT, 'case', f'nextmile_case_sheet{i}.svg')
         write(sheet, dst)
         print('wrote', dst, [n for n, *_ in sheet])
+    P = parts()
+    feet = [p for n, p, _ in P if n.startswith('STAND FOOT')]
+    singles = [(n, [p], e) for n, p, e in P if not n.startswith('STAND FOOT')]
+    singles.append(('STAND FEET x4', feet * 2, []))
+    os.makedirs(os.path.join(ROOT, 'case', 'pieces'), exist_ok=True)
+    for name, polys, eng in singles:
+        slug = name.lower().replace(' ', '_')
+        write(centered(name, polys, eng), os.path.join(ROOT, 'case', 'pieces', f'{slug}.svg'), BED)
+    print('wrote', len(singles), 'single-piece files in case/pieces')
     print(f'case {OUT_W:.0f} x {OUT_H:.0f} x {T * (4 + SPACERS):.0f} mm')
 
 
