@@ -41,7 +41,10 @@ String wxStatus;
 void ledWrite(uint32_t rgb, float level) {
   if (level < 0) level = 0;
   if (level > 1) level = 1;
-  int r = (int)(((rgb >> 16) & 0xFF) * level), g = (int)(((rgb >> 8) & 0xFF) * level), b = (int)((rgb & 0xFF) * level);
+  // Gamma so mid values stay dim, and green trimmed because this LED's green die is much brighter;
+  // otherwise purples and pinks wash out to white.
+  auto ch = [&](int v, float gain) { return (int)(255 * powf(v / 255.0f, 2.2f) * gain * level + 0.5f); };
+  int r = ch((rgb >> 16) & 0xFF, 1.0f), g = ch((rgb >> 8) & 0xFF, 0.5f), b = ch(rgb & 0xFF, 1.0f);
   ledcWrite(CH_R, 255 - r);
   ledcWrite(CH_G, 255 - g);
   ledcWrite(CH_B, 255 - b);

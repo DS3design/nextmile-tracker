@@ -40,7 +40,7 @@ def icon_header():
 def splash():
     m = logo_alpha(os.path.join(ASSETS, 'nextmile_logo.png'))
     W, H = 320, 240
-    s = min((W - 40) / m.size[0], (H - 40) / m.size[1])
+    s = min((W - 100) / m.size[0], (H - 100) / m.size[1])
     m = m.resize((round(m.size[0] * s), round(m.size[1] * s)), Image.LANCZOS)
     img = Image.new('RGB', (W, H), (0, 0, 0))
     white = Image.new('RGB', m.size, (255, 255, 255))
