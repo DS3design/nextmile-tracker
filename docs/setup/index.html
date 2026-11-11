@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Set up your Next Mile Tracker</title>
+<style>
+body{margin:0;background:#000;color:#fff;font:18px/1.5 -apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:460px;margin:0 auto;padding:24px 20px 40px}
+h1{font-size:24px;margin:0 0 6px;border-bottom:3px solid #e4002b;padding-bottom:8px}
+.step{color:#e4002b;font-weight:700;font-size:14px;letter-spacing:.06em;text-transform:uppercase;margin:14px 0 0}
+p{margin:12px 0}.dim{color:#aaa;font-size:16px}
+button,a.btn{display:block;width:100%;box-sizing:border-box;padding:16px;margin:16px 0;border:0;border-radius:12px;background:#e4002b;color:#fff;font-size:20px;font-weight:700;text-align:center;text-decoration:none;font-family:inherit}
+button.ghost{background:transparent;border:2px solid #777;font-size:17px;font-weight:600;padding:12px}
+.net{display:flex;justify-content:space-between;align-items:center;text-align:left;background:#1c1c1c;border:2px solid #333;font-weight:600;margin:8px 0}
+.bars{color:#aaa;font-size:15px;font-weight:400}
+input{width:100%;box-sizing:border-box;font-size:20px;padding:14px;border-radius:10px;border:2px solid #555;background:#111;color:#fff}
+label.show{display:flex;align-items:center;gap:10px;margin:12px 0;font-size:17px}label.show input{width:24px;height:24px}
+.err{background:#3a0010;border-left:5px solid #e4002b;padding:10px 14px;border-radius:6px}
+.spin{display:inline-block;width:22px;height:22px;border:3px solid #555;border-top-color:#fff;border-radius:50%;animation:s 1s linear infinite;vertical-align:-4px;margin-right:10px}
+@keyframes s{to{transform:rotate(360deg)}}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+<h1>Set up your tracker</h1>
+<div id="v"></div>
+</main>
+<script>
+var SVC='6e4d0001-7e1a-4c1b-9a3e-6e6578744d31',NETS='6e4d0002-7e1a-4c1b-9a3e-6e6578744d31',
+    STATE='6e4d0003-7e1a-4c1b-9a3e-6e6578744d31',CMD='6e4d0004-7e1a-4c1b-9a3e-6e6578744d31';
+var v=document.getElementById('v'),dev,chNets,chState,chCmd,picked='',lastErr='';
+var ua=navigator.userAgent,isIOS=/iPhone|iPad|iPod/.test(ua)||(/Macintosh/.test(ua)&&'ontouchend' in document),isAndroid=/Android/.test(ua);
+function esc(s){return s.replace(/[&<>"']/g,function(c){return'&#'+c.charCodeAt(0)+';'})}
+function show(h){v.innerHTML=h}
+function step(t){return '<p class="step">'+t+'</p>'}
+
+function start(){
+  if(isIOS){show(step('iPhone')+'<p>On an iPhone, go back to the tracker and scan the code labeled <b>IPHONE</b> with your camera, then tap <b>Join</b>.</p><p>The setup page opens by itself.</p>');return}
+  if(!navigator.bluetooth){
+    if(isAndroid){
+      var u='intent://'+location.host+location.pathname+'#Intent;scheme=https;package=com.android.chrome;end';
+      show(step('One more tap')+'<p>This page needs Google Chrome.</p><a class="btn" href="'+u+'">Open in Chrome</a><p class="dim">Don\'t have Chrome? Install it from the Play Store, then scan the code on the tracker again.</p>');
+    }else show('<p>Please open this page on your phone. Scan the code on the tracker\'s screen with your phone\'s camera.</p>');
+    return}
+  show(step('Step 1 of 3')+'<p>Make sure the tracker is plugged in and says <b>Welcome!</b></p>'+
+    (lastErr?'<p class="err">'+lastErr+'</p>':'')+
+    '<button id="go">Find my tracker</button><p class="dim">Your phone will show <b>NextMile Tracker</b>. Tap it, then tap <b>Pair</b> or <b>Connect</b>. If your phone asks to turn on Bluetooth or allow nearby devices, tap <b>Allow</b>.</p>');
+  document.getElementById('go').onclick=find;
+}
+
+async function find(){
+  lastErr='';
+  try{
+    dev=await navigator.bluetooth.requestDevice({filters:[{namePrefix:'NextMile'}],optionalServices:[SVC]});
+  }catch(e){
+    lastErr=e.name==='NotFoundError'?'The tracker wasn\'t picked. Tap Find my tracker again, then tap NextMile Tracker in the list. If it isn\'t in the list, unplug the tracker, plug it back in, and wait for Welcome!':'Bluetooth didn\'t start. Turn on Bluetooth on your phone and try again.';
+    return start()}
+  show('<p><span class="spin"></span>Connecting to your tracker...</p>');
+  try{
+    dev.addEventListener('gattserverdisconnected',lost);
+    var srv=await dev.gatt.connect(),s=await srv.getPrimaryService(SVC);
+    chNets=await s.getCharacteristic(NETS);chState=await s.getCharacteristic(STATE);chCmd=await s.getCharacteristic(CMD);
+    chState.addEventListener('characteristicvaluechanged',function(e){onState(new TextDecoder().decode(e.target.value))});
+    await chState.startNotifications();
+    scan();
+  }catch(e){lastErr='Couldn\'t connect to the tracker. Move your phone closer and try again.';start()}
+}
+var done=false;
+function lost(){if(done)return;lastErr='The connection to the tracker dropped. Keep your phone close and try again.';start()}
+async function send(t){await chCmd.writeValueWithResponse(new TextEncoder().encode(t))}
+function scan(){show(step('Step 2 of 3')+'<p><span class="spin"></span>Looking for WiFi near the tracker...</p>');send('scan')}
+
+async function onState(st){
+  if(st==='nets')return list();
+  if(st==='joining')return show(step('Step 3 of 3')+'<p><span class="spin"></span>Connecting the tracker to <b>'+esc(picked)+'</b>...</p><p class="dim">This takes about 20 seconds.</p>');
+  if(st.indexOf('ok|')===0){done=true;var ip=st.slice(3);
+    return show(step('WiFi connected!')+'<p>Your tracker is on <b>'+esc(picked)+'</b>.</p><p>Next, connect the app your watch uses so your miles show up.</p><a class="btn" href="http://'+ip+'/link">Connect my watch</a><p class="dim">Or point your camera at the new code on the tracker.</p>')}
+  if(st==='badpw'){lastErr='That password didn\'t work. Please type it again. Passwords are case sensitive.';return pickPw()}
+  if(st==='notfound'){lastErr='The tracker couldn\'t reach '+esc(picked)+'. Move it closer to your router and try again.';return list()}
+}
+
+async function list(){
+  var nets=[];try{nets=JSON.parse(new TextDecoder().decode(await chNets.readValue()))}catch(e){}
+  var h=step('Step 2 of 3')+(lastErr?'<p class="err">'+lastErr+'</p>':'')+'<p><b>Tap your home WiFi.</b></p>';
+  if(!nets.length)h+='<p>No WiFi found yet.</p>';
+  nets.forEach(function(n,i){var b=n[1]>-60?'Strong':n[1]>-72?'Good':'Weak';h+='<button class="net" data-i="'+i+'"><span>'+esc(n[0])+'</span><span class="bars">'+b+'</span></button>'});
+  h+='<button class="ghost" id="again">Don\'t see it? Look again</button><p class="dim">The tracker only sees regular WiFi, not 5G-only WiFi. If your WiFi has two names, pick the one without 5G.</p>';
+  show(h);lastErr='';
+  document.getElementById('again').onclick=scan;
+  [].forEach.call(document.querySelectorAll('.net'),function(b){b.onclick=function(){var n=nets[+b.dataset.i];picked=n[0];n[2]?join(''):pickPw()}});
+}
+
+function pickPw(){
+  show(step('Step 3 of 3')+(lastErr?'<p class="err">'+lastErr+'</p>':'')+'<p>Type the password for <b>'+esc(picked)+'</b>.</p><input id="pw" type="password" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Your home WiFi password"><label class="show"><input type="checkbox" id="sh">Show password</label><button id="ok">Connect</button><button class="ghost" id="back">Pick a different WiFi</button><p class="dim">The password is often on a sticker on your router.</p>');
+  lastErr='';
+  var pw=document.getElementById('pw');pw.focus();
+  document.getElementById('sh').onchange=function(e){pw.type=e.target.checked?'text':'password'};
+  document.getElementById('ok').onclick=function(){if(pw.value)join(pw.value);else pw.focus()};
+  document.getElementById('back').onclick=list;
+}
+async function join(pw){
+  try{await send(JSON.stringify({s:picked,p:pw}))}catch(e){lost()}
+}
+start();
+</script>
+</body>
+</html>

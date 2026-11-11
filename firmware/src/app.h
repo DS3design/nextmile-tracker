@@ -4,6 +4,7 @@
 #include "ui.h"
 
 #define AP_NAME "NextMile-Setup"
+#define SETUP_URL "https://ds3design.github.io/nextmile-tracker/setup/"
 #define DEFAULT_TZ "PST8PDT,M3.2.0,M11.1.0"
 
 struct Settings {

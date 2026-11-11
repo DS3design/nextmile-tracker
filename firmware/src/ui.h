@@ -41,7 +41,7 @@ void setTheme(int i);
 uint32_t accent();  // current theme's accent colour, 0xRRGGBB
 void init();
 void main(lgfx::LovyanGFX& g, const UiData& d);
-void wifiSetup(lgfx::LovyanGFX& g, const char* apName, bool failed = false);
+void wifiSetup(lgfx::LovyanGFX& g, const char* apName, const char* setupUrl, bool failed = false);
 void wifiHelp(lgfx::LovyanGFX& g, const char* apName);
 void wifiRetry(lgfx::LovyanGFX& g, const char* ssid);
 void linkStrava(lgfx::LovyanGFX& g, const char* url, const char* ip, bool relink);

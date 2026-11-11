@@ -9,6 +9,7 @@
 #include <time.h>
 
 #include "app.h"
+#include "ble_setup.h"
 #include "board.h"
 #include "activities.h"
 #include "extras.h"
@@ -38,7 +39,8 @@ bool overlayInfo = false;
 uint32_t infoSince = 0;
 bool dirty = true;
 
-bool wifiHelpOn = false, wifiFailed = false, wifiTrying = false;
+bool wifiHelpOn = false, wifiFailed = false, wifiTrying = false, bleJoining = false, bleFailed = false;
+uint32_t bleJoinAt = 0, bleEndAt = 0;
 bool portalActive = false, netUp = false, everConnected = false, wifiSaved = false;
 uint32_t wifiTryAt = 0;
 bool wantFull = true, wantRecent = false, wantPortal = false, wantReset = false, needRelink = false;
@@ -188,12 +190,21 @@ const char PORTAL_HEAD[] PROGMEM =
 
 void startPortal() {
   wantPortal = false;
-  wifiHelpOn = wifiFailed = wifiTrying = false;
+  // Bluetooth's memory is handed back on normal boots, so setup needs a fresh start.
+  if (!blesetup::begin()) {
+    prefs.putBool("sboot", true);
+    ui::message(lcd, "Restarting...", "Getting ready for WiFi setup.", nullptr);
+    delay(800);
+    ESP.restart();
+  }
+  wifiHelpOn = wifiTrying = false;
+  wifiFailed = bleFailed;
+  bleFailed = false;
   web::stop();
   MDNS.end();
   netUp = false;
   overlayInfo = false;
-  ui::wifiSetup(lcd, AP_NAME);
+  ui::wifiSetup(lcd, AP_NAME, SETUP_URL, wifiFailed);
   shown = Screen::Portal;
   wm.setConfigPortalBlocking(false);
   wm.setConnectTimeout(20);
@@ -212,10 +223,54 @@ void startPortal() {
     shown = Screen::None;
   });
   wm.setHostname("nextmile");
+  // A public-range address: some Android phones (Samsung) won't pop up a sign-in page for a private one.
+  wm.setAPStaticIPConfig(IPAddress(4, 3, 2, 1), IPAddress(4, 3, 2, 1), IPAddress(255, 255, 255, 0));
+  wm.setDebugOutput(true, WM_DEBUG_DEV);
   static std::vector<const char*> menu = {"wifi"};
   wm.setMenu(menu);
   wm.startConfigPortal(AP_NAME);
   portalActive = true;
+}
+
+// An Android phone sent the home WiFi over Bluetooth.
+void startBleJoin(const String& ssid, const String& pass) {
+  Serial.printf("ble join %s\n", ssid.c_str());
+  blesetup::setState("joining");
+  wifiHelpOn = false;
+  lcd.startWrite();
+  ui::message(lcd, "Connecting...", "Joining your home WiFi.", "This takes about 20 seconds.");
+  lcd.endWrite();
+  shown = Screen::None;
+  if (portalActive) {
+    wm.stopConfigPortal();
+    portalActive = false;
+  }
+  WiFi.mode(WIFI_STA);
+  WiFi.persistent(true);
+  WiFi.begin(ssid.c_str(), pass.c_str());
+  bleJoining = true;
+  bleJoinAt = millis();
+}
+
+void checkBleJoin() {
+  const wl_status_t st = WiFi.status();
+  const uint32_t since = millis() - bleJoinAt;
+  if (st == WL_CONNECTED) {
+    bleJoining = false;
+    wifiSaved = true;
+    String ok = "ok|" + WiFi.localIP().toString();
+    blesetup::setState(ok.c_str());
+    bleEndAt = millis() + 6000;  // let the phone read the result before Bluetooth goes off
+    return;
+  }
+  const bool bad = (st == WL_CONNECT_FAILED || st == WL_NO_SSID_AVAIL) && since > 6000;
+  if (!bad && since < 25000) return;
+  bleJoining = false;
+  blesetup::setState(st == WL_NO_SSID_AVAIL ? "notfound" : "badpw");
+  WiFi.disconnect(false, true);  // don't keep a password that didn't work
+  wifiSaved = false;
+  bleFailed = true;
+  wantPortal = true;
 }
 
 void factoryReset() {
@@ -369,7 +424,7 @@ void draw(Screen s) {
     case Screen::WifiRetry: ui::wifiRetry(lcd, WiFi.SSID().c_str()); break;
     case Screen::Connecting: ui::message(lcd, "Connecting...", "Joining your WiFi.", nullptr); break;
     case Screen::Clock: ui::message(lcd, "Connected!", "Setting the clock...", nullptr); break;
-    case Screen::Portal: ui::wifiSetup(lcd, AP_NAME, wifiFailed); break;
+    case Screen::Portal: ui::wifiSetup(lcd, AP_NAME, SETUP_URL, wifiFailed); break;
     case Screen::WifiHelp: ui::wifiHelp(lcd, AP_NAME); break;
     case Screen::NotConfigured:
       ui::message(lcd, "Almost ready", "This tracker is missing its Strava keys.", "Contact DS3design to finish setup.");
@@ -608,6 +663,9 @@ void setup() {
   WiFi.setHostname("nextmile");
   WiFi.setAutoReconnect(true);
   const bool haveWifi = wm.getWiFiIsSaved();
+  const bool setupBoot = prefs.getBool("sboot", false);
+  if (setupBoot) prefs.remove("sboot");
+  if (haveWifi && !setupBoot) blesetup::releaseUnused();
   wifiSaved = haveWifi;
   if (haveWifi) WiFi.begin();  // connects in the background while the intro plays
   wifiTryAt = millis();
@@ -615,7 +673,7 @@ void setup() {
   playIntro();
   splash();
 
-  if (!haveWifi) wantPortal = true;
+  if (!haveWifi || setupBoot) wantPortal = true;
   draw(baseScreen());
   applyBacklight();
 }
@@ -623,6 +681,15 @@ void setup() {
 void loop() {
   if (wantReset) factoryReset();
   if (wantPortal) startPortal();
+
+  blesetup::loop();
+  String bs, bp;
+  if (blesetup::takeCreds(bs, bp)) startBleJoin(bs, bp);
+  if (bleJoining) checkBleJoin();
+  if (bleEndAt && (int32_t)(millis() - bleEndAt) > 0) {
+    bleEndAt = 0;
+    blesetup::end();
+  }
 
   if (portalActive) {
     wm.process();
@@ -635,7 +702,7 @@ void loop() {
   }
 
   // Routers often refuse the first join right after a restart, and the ESP32 doesn't retry that on its own.
-  if (!portalActive && wifiSaved) {
+  if (!portalActive && wifiSaved && !bleJoining) {
     const wl_status_t st = WiFi.status();
     const uint32_t since = millis() - wifiTryAt;
     if (st != WL_CONNECTED && (st == WL_CONNECT_FAILED || st == WL_NO_SSID_AVAIL ? since > 4000 : since > 20000)) {

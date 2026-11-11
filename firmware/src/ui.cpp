@@ -276,34 +276,30 @@ void main(lgfx::LovyanGFX& g, const UiData& d) {
   if (d.sync_error) g.fillCircle(312, 232, 3, c(g, RED));
 }
 
-void wifiSetup(lgfx::LovyanGFX& g, const char* apName, bool failed) {
+void wifiSetup(lgfx::LovyanGFX& g, const char* apName, const char* setupUrl, bool failed) {
   g.fillScreen(c(g, BLACK));
   header(g, "Welcome!", true);
   text(g, &f_label, RED, BLACK, top_left, failed ? "THAT DIDN'T CONNECT. TRY AGAIN." : "STEP 1 OF 2  -  YOUR HOME WIFI", 12, 46);
+  text(g, &f_body, WHITE, BLACK, top_center, "Point your phone's camera at your code:", 160, 64);
+  qr(g, setupUrl, 34, 88, 92);
   char wifiQr[64];
   snprintf(wifiQr, sizeof wifiQr, "WIFI:T:nopass;S:%s;;", apName);
-  qr(g, wifiQr, 18, 78, 104);
-  int y;
-  if (failed) {
-    y = wrap(g, &f_body, WHITE, 140, 70, 172, 19, "Check the WiFi password on your phone and try again.");
-    wrap(g, &f_body, GREY, 140, y + 8, 172, 19, "Page gone? Scan this code again.");
-  } else {
-    y = wrap(g, &f_body, WHITE, 140, 70, 172, 19, "Open your phone's camera, point it at this code, and tap Join.");
-    wrap(g, &f_body, GREY, 140, y + 8, 172, 19, "A setup page opens on your phone.");
-  }
-  g.drawFastHLine(12, 196, 296, c(g, GREY));
-  text(g, &f_body, WHITE, BLACK, top_center, "No page? Tap here for help.", 160, 206);
+  qr(g, wifiQr, 194, 88, 92);
+  text(g, &f_mid, WHITE, BLACK, top_center, "ANDROID", 80, 184);
+  text(g, &f_mid, WHITE, BLACK, top_center, "IPHONE", 240, 184);
+  text(g, &f_body, GREY, BLACK, top_center, "Need help? Tap here.", 160, 216);
 }
 
 void wifiHelp(lgfx::LovyanGFX& g, const char* apName) {
   g.fillScreen(c(g, BLACK));
   header(g, "Need help?", true);
-  char s1[96];
-  snprintf(s1, sizeof s1, "1. In your phone's WiFi settings, join %s. It's OK if it says No internet.", apName);
-  int y = wrap(g, &f_body, WHITE, 12, 44, 296, 19, s1);
-  y = wrap(g, &f_body, WHITE, 12, y + 6, 296, 19, "2. Open Safari or Chrome and type this in the address bar:");
-  text(g, &f_title, WHITE, BLACK, top_center, "192.168.4.1", 160, y + 6);
-  text(g, &f_body, GREY, BLACK, top_center, "Tap the screen to go back.", 160, 214);
+  int y = wrap(g, &f_body, WHITE, 12, 44, 296, 19,
+               "ANDROID: scan the left code. A page opens. Tap Find my tracker and follow the steps.");
+  char s[128];
+  snprintf(s, sizeof s, "IPHONE: scan the right code and tap Join. The setup page opens by itself.");
+  y = wrap(g, &f_body, WHITE, 12, y + 10, 296, 19, s);
+  wrap(g, &f_body, GREY, 12, y + 10, 296, 19, "Keep your phone close to the tracker.");
+  text(g, &f_body, GREY, BLACK, top_center, "Tap the screen to go back.", 160, 216);
 }
 
 void wifiRetry(lgfx::LovyanGFX& g, const char* ssid) {

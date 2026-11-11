@@ -359,7 +359,7 @@ void handleWifi() {
   sendPage("Change WiFi", "<p>The tracker now shows a code for WiFi setup.</p><ol>"
                           "<li>Point your phone's camera at the code on the tracker and tap <b>Join</b>. "
                           "(Or join <b>" AP_NAME "</b> in your phone's WiFi settings.)</li>"
-                          "<li>A setup page opens. If it doesn't, open your browser and go to <b>192.168.4.1</b>.</li>"
+                          "<li>A setup page opens. If it doesn't, open your browser and go to <b>4.3.2.1</b>.</li>"
                           "<li>Tap <b>Choose my home WiFi</b>, tap your WiFi name and type its password.</li></ol>");
   app::requestPortal();
 }
