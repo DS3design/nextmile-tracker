@@ -23,7 +23,7 @@ ROOT = os.path.join(HERE, '..')
 T = 3.0          # sheet thickness
 KERF = 0.15      # beam width; outlines grow / holes shrink by KERF/2 so parts come out to size
 
-# ---- board (measured from photos, +/-1 mm), front view in landscape: display flex on the left, USB on the right ----
+# ---- board (measured from photos, +/-1 mm), front view in landscape: antenna end on the left, USB and display ribbon on the right ----
 PCB_W, PCB_H = 87.0, 50.5
 HOLE_D = 3.2                      # not used by the case bolts, the board floats in its pocket
 GLASS_W, GLASS_H, GLASS_X = 70.5, 50.5, 8.5    # display module outline, x from PCB left edge
@@ -31,7 +31,8 @@ VIEW_W, VIEW_H = 58.5, 44.0       # visible screen area (2.8" panel is 57.6 x 43
 VIEW_X = GLASS_X + (GLASS_W - VIEW_W) / 2 - 1.0
 USB_Y, USB_W = PCB_H / 2, 15.0    # USB-C on the right short edge, about centred (micro-USB stays covered)
 RST_X, RST_Y = 10.0, 10.0         # reset button (BOOT is just below it), front-view coordinates
-LDR_X, LDR_Y = 4.0, 39.5          # light sensor on the front, left of the glass
+LDR_X, LDR_Y = 4.2, 38.1          # light sensor (R21, white 3.4 x 5.1 mm part) on the front, left of the glass
+LDR_W, LDR_H = 3.8, 5.5
 LED_X, LED_Y = 29.0, 38.0         # RGB LED on the back, front-view coordinates
 
 # ---- case ----
@@ -150,7 +151,8 @@ def parts():
     eng = [trace(nm, dark, SIDE + 2, band_y - 1, 26, BOTTOM - 2),
            text_path('NEXT MILE TRACKER', OUT_W / 2 + 13, band_y + 6.5, 4.8),
            text_path('PACEGIVING 2026', OUT_W / 2 + 13, band_y + 13.0, 4.3)]
-    ldr = Point(BX + LDR_X, BY + LDR_Y).buffer(1.75, 32)   # light sensor peeks through the frame
+    ldr = box(BX + LDR_X - LDR_W / 2, BY + LDR_Y - LDR_H / 2,
+              BX + LDR_X + LDR_W / 2, BY + LDR_Y + LDR_H / 2)   # the whole sensor shows through the frame
     P.append(('1 FRONT', plate(window, [ldr]), eng))
 
     # 2 bezel: holds the display glass
