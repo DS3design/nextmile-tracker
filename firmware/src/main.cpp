@@ -268,12 +268,13 @@ void maybeSync() {
   bool lastYear = t.lastYear != y - 1;
   if (!full && !recent && !lastYear) return;
 
-  if ((t.year == 0 || reloadAll) && shown != Screen::Info) drawLoading();
+  const bool reread = reloadAll;  // also redo last year, which is otherwise read only once
+  if ((t.year == 0 || reread) && shown != Screen::Info) drawLoading();
   reloadAll = false;
   src::Result r = src::OK;
   syncing = true;
   if (full || recent) r = src::sync(y, full, app::cfg.kinds);
-  if (r == src::OK && acts::totals().lastYear != y - 1) r = src::syncLastYear(y - 1, app::cfg.kinds);
+  if (r == src::OK && (reread || acts::totals().lastYear != y - 1)) r = src::syncLastYear(y - 1, app::cfg.kinds);
   syncing = loadingShown = false;
 
   lastResult = r;
