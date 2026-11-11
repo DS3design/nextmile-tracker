@@ -206,6 +206,7 @@ void main(lgfx::LovyanGFX& g, const UiData& d) {
   // last run panel
   const int px = 12, py = 186, pw = 296, ph = 48;
   g.fillRoundRect(px, py, pw, ph, 6, c(g, PANEL));
+  g.setClipRect(px, py, pw, ph);  // the big font's background box runs past the panel's bottom edge
   if (d.last.valid) {
     char date[24] = "";
     time_t t = (time_t)d.last.start_local;
@@ -247,6 +248,7 @@ void main(lgfx::LovyanGFX& g, const UiData& d) {
                                                                                         : "No runs yet this year. Go get one!";
     text(g, &f_mid, WHITE, PANEL, top_left, none, px + 10, py + 22);
   }
+  g.clearClipRect();
   if (d.sync_error) g.fillCircle(312, 232, 3, c(g, RED));
 }
 
