@@ -3,7 +3,7 @@
 #include <Arduino.h>
 #include "ui.h"
 
-#define AP_NAME "NextMile-Tracker"
+#define AP_NAME "NextMile-Setup"
 #define DEFAULT_TZ "PST8PDT,M3.2.0,M11.1.0"
 
 struct Settings {

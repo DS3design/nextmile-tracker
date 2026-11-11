@@ -1,3 +1,4 @@
+#include <string>
 #include "ui.h"
 
 #include <stdio.h>
@@ -119,6 +120,29 @@ void qr(lgfx::LovyanGFX& g, const char* s, int x, int y, int size) {
 void lines(lgfx::LovyanGFX& g, const lgfx::IFont* f, uint32_t fg, int x, int y, int lh,
            const char* const* ls, int n) {
   for (int i = 0; i < n; i++) text(g, f, fg, BLACK, top_left, ls[i], x, y + i * lh);
+}
+
+// Word-wraps s to width w; returns the y just below the last line.
+int wrap(lgfx::LovyanGFX& g, const lgfx::IFont* f, uint32_t fg, int x, int y, int w, int lh, const char* s) {
+  g.setFont(f);
+  std::string line, word;
+  auto flush = [&]() {
+    if (line.length()) text(g, f, fg, BLACK, top_left, line.c_str(), x, y), y += lh;
+    line = "";
+  };
+  for (const char* p = s;; p++) {
+    if (*p == ' ' || *p == '\n' || *p == 0) {
+      std::string t = line.length() ? line + " " + word : word;
+      if (line.length() && g.textWidth(t.c_str()) > w) flush(), t = word;
+      line = t;
+      word = "";
+      if (*p == '\n' || *p == 0) flush();
+      if (*p == 0) break;
+    } else {
+      word += *p;
+    }
+  }
+  return y;
 }
 
 }  // namespace
@@ -252,44 +276,60 @@ void main(lgfx::LovyanGFX& g, const UiData& d) {
   if (d.sync_error) g.fillCircle(312, 232, 3, c(g, RED));
 }
 
-void wifiSetup(lgfx::LovyanGFX& g, const char* apName) {
+void wifiSetup(lgfx::LovyanGFX& g, const char* apName, bool failed) {
   g.fillScreen(c(g, BLACK));
-  header(g, "Let's get connected", true);
-  text(g, &f_label, RED, BLACK, top_left, "STEP 1 OF 2  -  WIFI", 12, 46);
+  header(g, "Welcome!", true);
+  text(g, &f_label, RED, BLACK, top_left, failed ? "THAT DIDN'T CONNECT. TRY AGAIN." : "STEP 1 OF 2  -  YOUR HOME WIFI", 12, 46);
   char wifiQr[64];
   snprintf(wifiQr, sizeof wifiQr, "WIFI:T:nopass;S:%s;;", apName);
-  qr(g, wifiQr, 18, 84, 104);
-  const char* ls[] = {"Scan with your phone", "camera, or open WiFi", "settings and join:"};
-  lines(g, &f_body, WHITE, 140, 72, 19, ls, 3);
-  text(g, &f_mid, WHITE, BLACK, top_left, apName, 140, 130);
-  const char* ls2[] = {"A setup page opens.", "Pick your home WiFi", "(must be 2.4 GHz)."};
-  lines(g, &f_body, GREY, 140, 162, 19, ls2, 3);
+  qr(g, wifiQr, 18, 78, 104);
+  int y;
+  if (failed) {
+    y = wrap(g, &f_body, WHITE, 140, 70, 172, 19, "Check the WiFi password on your phone and try again.");
+    wrap(g, &f_body, GREY, 140, y + 8, 172, 19, "Page gone? Scan this code again.");
+  } else {
+    y = wrap(g, &f_body, WHITE, 140, 70, 172, 19, "Open your phone's camera, point it at this code, and tap Join.");
+    wrap(g, &f_body, GREY, 140, y + 8, 172, 19, "A setup page opens on your phone.");
+  }
+  g.drawFastHLine(12, 196, 296, c(g, GREY));
+  text(g, &f_body, WHITE, BLACK, top_center, "No page? Tap here for help.", 160, 206);
+}
+
+void wifiHelp(lgfx::LovyanGFX& g, const char* apName) {
+  g.fillScreen(c(g, BLACK));
+  header(g, "Need help?", true);
+  char s1[96];
+  snprintf(s1, sizeof s1, "1. In your phone's WiFi settings, join %s. It's OK if it says No internet.", apName);
+  int y = wrap(g, &f_body, WHITE, 12, 44, 296, 19, s1);
+  y = wrap(g, &f_body, WHITE, 12, y + 6, 296, 19, "2. Open Safari or Chrome and type this in the address bar:");
+  text(g, &f_title, WHITE, BLACK, top_center, "192.168.4.1", 160, y + 6);
+  text(g, &f_body, GREY, BLACK, top_center, "Tap the screen to go back.", 160, 214);
 }
 
 void wifiRetry(lgfx::LovyanGFX& g, const char* ssid) {
   g.fillScreen(c(g, BLACK));
   header(g, "WiFi not found", false);
-  text(g, &f_mid, WHITE, BLACK, top_center, "Looking for your WiFi:", 160, 70);
+  text(g, &f_mid, WHITE, BLACK, top_center, "Looking for:", 160, 60);
   char s[48];
   snprintf(s, sizeof s, "\"%s\"", ssid);
-  text(g, &f_title, WHITE, BLACK, top_center, s, 160, 100);
-  text(g, &f_body, GREY, BLACK, top_center, "Still trying in the background.", 160, 150);
-  text(g, &f_body, GREY, BLACK, top_center, "New router or moved? Tap the screen", 160, 180);
-  text(g, &f_body, GREY, BLACK, top_center, "to set up WiFi again.", 160, 200);
+  text(g, &f_title, WHITE, BLACK, top_center, s, 160, 88);
+  text(g, &f_body, GREY, BLACK, top_center, "It keeps trying on its own.", 160, 132);
+  g.drawFastHLine(12, 166, 296, c(g, GREY));
+  text(g, &f_body, WHITE, BLACK, top_center, "New router or new home?", 160, 178);
+  text(g, &f_body, WHITE, BLACK, top_center, "Tap here to set up WiFi again.", 160, 200);
 }
 
 void linkStrava(lgfx::LovyanGFX& g, const char* url, const char* ip, bool relink) {
   g.fillScreen(c(g, BLACK));
-  header(g, relink ? "Reconnect your watch" : "Link your watch", true);
-  text(g, &f_label, RED, BLACK, top_left, relink ? "YOUR WATCH ACCOUNT NEEDS TO RELINK" : "STEP 2 OF 2  -  YOUR WATCH", 12, 46);
-  qr(g, url, 18, 84, 104);
-  const char* ls[] = {"Scan with your phone", "camera, then pick", "your watch brand."};
-  lines(g, &f_body, WHITE, 140, 72, 19, ls, 3);
-  const char* ls2[] = {"Phone must be on the", "same WiFi as this", "tracker. Or open:"};
-  lines(g, &f_body, GREY, 140, 138, 19, ls2, 3);
-  char u[40];
-  snprintf(u, sizeof u, "http://%s", ip);
-  text(g, &f_body, WHITE, BLACK, top_left, u, 140, 197);
+  header(g, relink ? "Reconnect your watch" : "WiFi connected!", true);
+  text(g, &f_label, RED, BLACK, top_left, relink ? "YOUR WATCH APP NEEDS TO RECONNECT" : "STEP 2 OF 2  -  YOUR WATCH APP", 12, 46);
+  qr(g, url, 18, 78, 104);
+  int y = wrap(g, &f_body, WHITE, 140, 70, 172, 19, "Point your phone's camera at this code and pick your watch.");
+  wrap(g, &f_body, GREY, 140, y + 8, 172, 19, "Your phone needs to be on your home WiFi.");
+  g.drawFastHLine(12, 196, 296, c(g, GREY));
+  char u[48];
+  snprintf(u, sizeof u, "No camera? Go to %s", ip);
+  text(g, &f_body, WHITE, BLACK, top_center, u, 160, 206);
 }
 
 void message(lgfx::LovyanGFX& g, const char* title, const char* line1, const char* line2) {

@@ -20,7 +20,7 @@
 
 namespace {
 
-enum class Screen { None, Portal, Connecting, Clock, WifiRetry, Link, Main, Info, NotConfigured };
+enum class Screen { None, Portal, WifiHelp, Connecting, Clock, WifiRetry, Link, Main, Info, NotConfigured };
 
 const uint32_t RECENT_EVERY_MS = 30UL * 60 * 1000;
 const uint32_t FULL_EVERY_MS = 24UL * 60 * 60 * 1000;
@@ -38,6 +38,7 @@ bool overlayInfo = false;
 uint32_t infoSince = 0;
 bool dirty = true;
 
+bool wifiHelpOn = false, wifiFailed = false, wifiTrying = false;
 bool portalActive = false, netUp = false, everConnected = false, wifiSaved = false;
 uint32_t wifiTryAt = 0;
 bool wantFull = true, wantRecent = false, wantPortal = false, wantReset = false, needRelink = false;
@@ -168,8 +169,24 @@ void loadSettings() {
   ui::setTheme(c.theme);
 }
 
+// Styling and small helpers for the WiFi setup pages on the phone.
+const char PORTAL_HEAD[] PROGMEM =
+    "<style>body{font-size:17px}.wrap{max-width:440px;width:92%}h1{font-size:1.6rem;margin:.6em 0 .3em}"
+    ".big{font-size:1.15rem}.hint{color:#aaa;font-size:1rem}"
+    "button,input[type=submit]{background:#e4002b;border-radius:10px;line-height:3rem;font-size:1.2rem}"
+    "button.ghost{background:transparent;border:2px solid #888;color:inherit;margin-top:8px}"
+    "input{font-size:1.1rem;padding:12px}label[for=s],label[for=p]{display:block;margin-top:14px;font-weight:bold}"
+    ".wrap>div>a{font-size:1.2rem;display:inline-block;padding:8px 0}</style>"
+    "<script>addEventListener('DOMContentLoaded',function(){var w=document.querySelector('.wrap');"
+    "if(!w||w.querySelector('h1'))return;var h=document.createElement('h1');h.textContent=document.title;"
+    "w.insertBefore(h,w.firstChild);if(location.pathname=='/wifi'){var p=document.createElement('p');"
+    "p.className='big';p.textContent='Tap your home WiFi name below, then type its password.';h.after(p)}});"
+    "addEventListener('click',function(e){if(e.target.getAttribute&&e.target.getAttribute('data-ssid')!==null)"
+    "setTimeout(function(){var p=document.getElementById('p');if(!p.disabled)p.focus()},50)});</script>";
+
 void startPortal() {
   wantPortal = false;
+  wifiHelpOn = wifiFailed = wifiTrying = false;
   web::stop();
   MDNS.end();
   netUp = false;
@@ -182,7 +199,16 @@ void startPortal() {
   wm.setDarkMode(true);
   wm.setShowInfoErase(false);
   wm.setShowInfoUpdate(false);
-  wm.setTitle("Next Mile Tracker");
+  wm.setTitle("Set up your tracker");
+  wm.setCustomHeadElement(PORTAL_HEAD);
+  wm.setPreSaveConfigCallback([] {
+    wifiTrying = true;
+    wifiHelpOn = false;
+    lcd.startWrite();
+    ui::message(lcd, "Connecting...", "Joining your home WiFi.", "This takes about 20 seconds.");
+    lcd.endWrite();
+    shown = Screen::None;
+  });
   wm.setHostname("nextmile");
   static std::vector<const char*> menu = {"wifi"};
   wm.setMenu(menu);
@@ -322,7 +348,7 @@ void maybeOta() {
 }
 
 Screen baseScreen() {
-  if (portalActive) return Screen::Portal;
+  if (portalActive) return wifiHelpOn ? Screen::WifiHelp : Screen::Portal;
   bool showData = src::linked() && !needRelink;
   if (showData && overlayInfo && netUp) return Screen::Info;
   if (showData) return Screen::Main;
@@ -341,7 +367,8 @@ void draw(Screen s) {
     case Screen::WifiRetry: ui::wifiRetry(lcd, WiFi.SSID().c_str()); break;
     case Screen::Connecting: ui::message(lcd, "Connecting...", "Joining your WiFi.", nullptr); break;
     case Screen::Clock: ui::message(lcd, "Connected!", "Setting the clock...", nullptr); break;
-    case Screen::Portal: ui::wifiSetup(lcd, AP_NAME); break;
+    case Screen::Portal: ui::wifiSetup(lcd, AP_NAME, wifiFailed); break;
+    case Screen::WifiHelp: ui::wifiHelp(lcd, AP_NAME); break;
     case Screen::NotConfigured:
       ui::message(lcd, "Almost ready", "This tracker is missing its Strava keys.", "Contact DS3design to finish setup.");
       break;
@@ -377,6 +404,8 @@ void onTap() {
       }
       break;
     case Screen::WifiRetry: wantPortal = true; break;
+    case Screen::Portal: wifiHelpOn = true; break;
+    case Screen::WifiHelp: wifiHelpOn = false; break;
     default: break;
   }
   dirty = true;
@@ -596,6 +625,10 @@ void loop() {
   if (portalActive) {
     wm.process();
     if (!wm.getConfigPortalActive()) portalActive = false;
+    if (wifiTrying) {  // a password was submitted on the phone and the join attempt just finished
+      wifiTrying = false;
+      if (portalActive && WiFi.status() != WL_CONNECTED) wifiFailed = true;
+    }
     if (WiFi.status() == WL_CONNECTED && !portalActive) dirty = true;
   }
 
@@ -641,7 +674,7 @@ void loop() {
   handleTouch();
   if (holdShown < 0) {
     Screen want = baseScreen();
-    if (want != shown || (dirty && want != Screen::Portal)) draw(want);
+    if (want != shown || (dirty && want != Screen::Portal && want != Screen::WifiHelp)) draw(want);
   }
   delay(10);
 }

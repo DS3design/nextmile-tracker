@@ -44,7 +44,10 @@ int main() {
   UiData d3; strcpy(d3.athlete, "Alex R."); d3.year = 2027; d3.goal_mi = 0;
   ui::main(s, d3); save(s, "out/main_new_year_no_goal.ppm");
 
-  ui::wifiSetup(s, "NextMile-Tracker"); save(s, "out/setup_wifi.ppm");
+  ui::wifiSetup(s, "NextMile-Setup"); save(s, "out/setup_wifi.ppm");
+  ui::wifiSetup(s, "NextMile-Setup", true); save(s, "out/setup_wifi_failed.ppm");
+  ui::wifiHelp(s, "NextMile-Setup"); save(s, "out/setup_wifi_help.ppm");
+  ui::wifiRetry(s, "Schomer-Home"); save(s, "out/wifi_retry.ppm");
   ui::linkStrava(s, "http://192.168.1.42/link", "192.168.1.42", false); save(s, "out/setup_strava.ppm");
   ui::message(s, "Loading your runs...", "Adding up this year's miles.", nullptr); save(s, "out/loading.ppm");
   ui::info(s, "http://192.168.1.42/", "192.168.1.42", "Schomer-Home"); save(s, "out/info.ppm");
