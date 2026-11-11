@@ -197,17 +197,18 @@ const char PORTAL_HEAD[] PROGMEM =
     "setTimeout(function(){var p=document.getElementById('p');if(!p.disabled)p.focus()},50)});</script>";
 
 void startScan() {
-  WiFi.scanDelete();
-  scanning = WiFi.scanNetworks(true) != WIFI_SCAN_FAILED;
+  scanning = true;
   nets.clear();
   netFirst = 0;
   if (setupView == SetupView::List) shown = Screen::None;
 }
 
+// Scans once "Looking for WiFi..." is on screen. Blocking: the async scan never finished alongside the setup WiFi.
 void pollScan() {
-  if (!scanning) return;
-  const int n = WiFi.scanComplete();
-  if (n == WIFI_SCAN_RUNNING) return;
+  if (!scanning || (setupView == SetupView::List && shown != Screen::WifiList)) return;
+  WiFi.scanDelete();
+  const int n = WiFi.scanNetworks(false, false, false, 300);
+  Serial.printf("wifi scan returned %d\n", n);
   scanning = false;
   for (int i = 0; i < n; i++) {
     String id = WiFi.SSID(i);
