@@ -46,8 +46,9 @@ void load(lgfx::VLWfont& f, lgfx::PointerWrapper& w, const uint8_t* data, size_t
 void text(lgfx::LovyanGFX& g, const lgfx::IFont* f, uint32_t fg, uint32_t bg, textdatum_t datum,
           const char* s, int x, int y) {
   g.setFont(f);
-  g.setTextColor(g.color888(fg >> 16, (fg >> 8) & 0xFF, fg & 0xFF),
-                 g.color888(bg >> 16, (bg >> 8) & 0xFF, bg & 0xFF));
+  (void)bg;
+  // Transparent: a font's background box is taller than its letters and would cover nearby bars and panels.
+  g.setTextColor(g.color888(fg >> 16, (fg >> 8) & 0xFF, fg & 0xFF));
   g.setTextDatum(datum);
   g.drawString(s, x, y);
 }
@@ -221,6 +222,8 @@ void main(lgfx::LovyanGFX& g, const UiData& d) {
       snprintf(left, sizeof left, "GOAL %s MI", gm);
     }
     snprintf(right, sizeof right, "%d%%", (int)(pct * 100 + 0.5f));
+    g.setFont(&f_label);
+    fit(g, &f_label, left, bw - g.textWidth(right) - 14);
     text(g, &f_label, WHITE, BLACK, top_left, left, bx, 141);
     text(g, &f_label, pct >= 1 ? RED : WHITE, BLACK, top_right, right, bx + bw, 141);
   } else {
@@ -245,8 +248,11 @@ void main(lgfx::LovyanGFX& g, const UiData& d) {
     snprintf(name, sizeof name, "LAST %s  -  %s", noun(d.kinds, false), d.last.name);
     char nameU[64];
     upper(nameU, sizeof nameU, name);
-    fit(g, &f_label, nameU, pw - 24 - dw - 10);
+    const int nameW = pw - 20 - dw - 16;
+    fit(g, &f_label, nameU, nameW);
+    g.setClipRect(px + 10, py, nameW, ph);
     text(g, &f_label, GREY, PANEL, top_left, nameU, px + 10, py + 5);
+    g.setClipRect(px, py, pw, ph);
     text(g, &f_label, GREY, PANEL, top_right, dateU, px + pw - 10, py + 5);
 
     float mi = d.last.meters / 1609.344f;
@@ -496,8 +502,8 @@ void info(lgfx::LovyanGFX& g, const char* url, const char* ip, const char* ssid,
   text(g, &f_label, WHITE, PANEL, middle_center, t, 87, THEME_BTN_Y + THEME_BTN_H / 2);
   text(g, &f_label, WHITE, PANEL, middle_center, ledAlways ? "LIGHT: ALWAYS ON" : "LIGHT: NEW MILES", 233,
        THEME_BTN_Y + THEME_BTN_H / 2);
-  text(g, &f_label, DIM, BLACK, top_center, "HOLD 10 SECONDS TO ERASE & START OVER", 160, 204);
-  text(g, &f_label, DIM, BLACK, top_center, "TAP ANYWHERE ELSE TO GO BACK", 160, 222);
+  text(g, &f_label, DIM, BLACK, top_center, "HOLD 10 SECONDS TO ERASE & START OVER", 160, 201);
+  text(g, &f_label, DIM, BLACK, top_center, "TAP ANYWHERE ELSE TO GO BACK", 160, 219);
 }
 
 void resetHold(lgfx::LovyanGFX& g, int secondsLeft) {

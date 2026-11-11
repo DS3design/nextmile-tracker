@@ -40,6 +40,8 @@ int main() {
   d2.goal_auto = false; d2.goal_mi = 1200; strcpy(d2.last.name, "Pacegiving 2026 - Roseville Charity Run 10K");
   d2.last.meters = 6.21f * 1609.344f; d2.last.moving_s = 3725; d2.wifi_ok = false;
   ui::main(s, d2); save(s, "out/main_goal_reached.ppm");
+  UiData d4 = d; strcpy(d4.athlete, "Don"); d4.ytd_m = 95.8f * 1609.344f; d4.ytd_runs = 91; d4.kinds = 3; d4.goal_mi = 90; d4.goal_auto = true; strcpy(d4.last.name, "Walk");
+  ui::main(s, d4); save(s, "out/main_goal_reached_auto.ppm");
 
   UiData d3; strcpy(d3.athlete, "Alex R."); d3.year = 2027; d3.goal_mi = 0;
   ui::main(s, d3); save(s, "out/main_new_year_no_goal.ppm");
