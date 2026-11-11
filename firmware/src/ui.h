@@ -44,7 +44,7 @@ void wifiSetup(lgfx::LovyanGFX& g, const char* apName);
 void wifiRetry(lgfx::LovyanGFX& g, const char* ssid);
 void linkStrava(lgfx::LovyanGFX& g, const char* url, const char* ip, bool relink);
 void message(lgfx::LovyanGFX& g, const char* title, const char* line1, const char* line2);
-void info(lgfx::LovyanGFX& g, const char* url, const char* ip, const char* ssid);
+void info(lgfx::LovyanGFX& g, const char* url, const char* ip, const char* ssid, bool ledAlways = false);
 void resetHold(lgfx::LovyanGFX& g, int secondsLeft);
 void formatMiles(char* out, size_t n, float miles, int decimals);
 }

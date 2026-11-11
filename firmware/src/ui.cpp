@@ -288,7 +288,7 @@ void message(lgfx::LovyanGFX& g, const char* title, const char* line1, const cha
   if (line2) text(g, &f_body, GREY, BLACK, top_center, line2, 160, 158);
 }
 
-void info(lgfx::LovyanGFX& g, const char* url, const char* ip, const char* ssid) {
+void info(lgfx::LovyanGFX& g, const char* url, const char* ip, const char* ssid, bool ledAlways) {
   g.fillScreen(c(g, BLACK));
   header(g, "Settings", true);
   qr(g, url, 18, 58, 104);
@@ -304,14 +304,19 @@ void info(lgfx::LovyanGFX& g, const char* url, const char* ip, const char* ssid)
   fit(g, &f_body, wf, 168);
   text(g, &f_body, GREY, BLACK, top_left, wf, 140, 126);
   text(g, &f_body, GREY, BLACK, top_left, "Data from your watch", 140, 150);
-  g.fillRoundRect(18, THEME_BTN_Y, 284, THEME_BTN_H, 6, c(g, PANEL));
-  g.drawRoundRect(18, THEME_BTN_Y, 284, THEME_BTN_H, 6, c(g, RED));
+  for (int x : {18, 164}) {
+    g.fillRoundRect(x, THEME_BTN_Y, 138, THEME_BTN_H, 6, c(g, PANEL));
+    g.drawRoundRect(x, THEME_BTN_Y, 138, THEME_BTN_H, 6, c(g, RED));
+  }
   char t[48], tn[24];
   upper(tn, sizeof tn, THEMES[cur].name);
-  snprintf(t, sizeof t, "COLORS: %s  -  TAP TO CHANGE", tn);
-  text(g, &f_label, WHITE, PANEL, middle_center, t, 160, THEME_BTN_Y + THEME_BTN_H / 2);
+  snprintf(t, sizeof t, "COLORS: %s", tn);
+  fit(g, &f_label, t, 130);
+  text(g, &f_label, WHITE, PANEL, middle_center, t, 87, THEME_BTN_Y + THEME_BTN_H / 2);
+  text(g, &f_label, WHITE, PANEL, middle_center, ledAlways ? "LIGHT: ALWAYS ON" : "LIGHT: NEW MILES", 233,
+       THEME_BTN_Y + THEME_BTN_H / 2);
   text(g, &f_label, DIM, BLACK, top_center, "HOLD 10 SECONDS TO ERASE & START OVER", 160, 204);
-  text(g, &f_label, DIM, BLACK, top_center, "TAP ANYWHERE ELSE TO GO BACK", 160, 222);
+  text(g, &f_label, DIM, BLACK, top_center, "TAP A BUTTON TO CHANGE IT, ELSEWHERE TO GO BACK", 160, 222);
 }
 
 void resetHold(lgfx::LovyanGFX& g, int secondsLeft) {

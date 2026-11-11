@@ -312,7 +312,7 @@ void draw(Screen s) {
   lcd.startWrite();
   switch (s) {
     case Screen::Main: ui::main(lcd, app::uiData()); break;
-    case Screen::Info: ui::info(lcd, ("http://" + ip + "/").c_str(), ip.c_str(), WiFi.SSID().c_str()); break;
+    case Screen::Info: ui::info(lcd, ("http://" + ip + "/").c_str(), ip.c_str(), WiFi.SSID().c_str(), app::cfg.led == 2); break;
     case Screen::Link: ui::linkStrava(lcd, ("http://" + ip + "/link").c_str(), ip.c_str(), needRelink); break;
     case Screen::WifiRetry: ui::wifiRetry(lcd, WiFi.SSID().c_str()); break;
     case Screen::Connecting: ui::message(lcd, "Connecting...", "Joining your WiFi.", nullptr); break;
@@ -340,8 +340,12 @@ void onTap() {
       break;
     case Screen::Info:
       if (touchY >= ui::THEME_BTN_Y - 10 && touchY <= ui::THEME_BTN_Y + ui::THEME_BTN_H + 6) {
-        app::cfg.theme = (app::cfg.theme + 1) % ui::themeCount();
-        ui::setTheme(app::cfg.theme);
+        if (touchX < 160) {
+          app::cfg.theme = (app::cfg.theme + 1) % ui::themeCount();
+          ui::setTheme(app::cfg.theme);
+        } else {
+          app::cfg.led = app::cfg.led == 2 ? 1 : 2;
+        }
         app::saveSettings();
         infoSince = millis();
       } else {
