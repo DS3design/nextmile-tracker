@@ -181,6 +181,8 @@ const char PORTAL_HEAD[] PROGMEM =
     "if(!w||w.querySelector('h1'))return;var h=document.createElement('h1');h.textContent=document.title;"
     "w.insertBefore(h,w.firstChild);if(location.pathname=='/wifi'){var p=document.createElement('p');"
     "p.className='big';p.textContent='Tap your home WiFi name below, then type its password.';h.after(p)}});"
+    "addEventListener('submit',function(e){var b=e.target.querySelector('button');if(b&&/\\/wifi(\\?|$)/.test(e.target.action))"
+    "b.textContent='Looking for WiFi... (about 10 seconds)'});"
     "addEventListener('click',function(e){if(e.target.getAttribute&&e.target.getAttribute('data-ssid')!==null)"
     "setTimeout(function(){var p=document.getElementById('p');if(!p.disabled)p.focus()},50)});</script>";
 
