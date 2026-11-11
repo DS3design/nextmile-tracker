@@ -38,7 +38,8 @@ bool overlayInfo = false;
 uint32_t infoSince = 0;
 bool dirty = true;
 
-bool portalActive = false, netUp = false, everConnected = false;
+bool portalActive = false, netUp = false, everConnected = false, wifiSaved = false;
+uint32_t wifiTryAt = 0;
 bool wantFull = true, wantRecent = false, wantPortal = false, wantReset = false, needRelink = false;
 uint32_t lastFull = 0, lastRecent = 0, lastSyncAt = 0, backoffUntil = 0, bootMs = 0;
 bool syncedOnce = false, syncing = false, loadingShown = false, bootSync = true;
@@ -200,6 +201,7 @@ void factoryReset() {
 
 void onNetUp() {
   netUp = true;
+  wifiSaved = true;
   everConnected = true;
   configTzTime(app::cfg.tz.c_str(), "pool.ntp.org", "time.google.com", "time.nist.gov");
   MDNS.begin("nextmile");
@@ -422,6 +424,11 @@ void handleTouch() {
 void syncPump() {
   if (!syncing) return;
   static int prevHold = -1;
+  static uint32_t logAt = 0;
+  if (millis() - logAt > 2000) {
+    logAt = millis();
+    Serial.printf("sync pump screen=%d\n", (int)shown);
+  }
   handleTouch();
   extras::loop(false);
   applyBacklight();
@@ -568,7 +575,9 @@ void setup() {
   WiFi.setHostname("nextmile");
   WiFi.setAutoReconnect(true);
   const bool haveWifi = wm.getWiFiIsSaved();
+  wifiSaved = haveWifi;
   if (haveWifi) WiFi.begin();  // connects in the background while the intro plays
+  wifiTryAt = millis();
 
   playIntro();
   splash();
@@ -586,6 +595,18 @@ void loop() {
     wm.process();
     if (!wm.getConfigPortalActive()) portalActive = false;
     if (WiFi.status() == WL_CONNECTED && !portalActive) dirty = true;
+  }
+
+  // Routers often refuse the first join right after a restart, and the ESP32 doesn't retry that on its own.
+  if (!portalActive && wifiSaved) {
+    const wl_status_t st = WiFi.status();
+    const uint32_t since = millis() - wifiTryAt;
+    if (st != WL_CONNECTED && (st == WL_CONNECT_FAILED || st == WL_NO_SSID_AVAIL ? since > 4000 : since > 20000)) {
+      Serial.printf("wifi retry (status %d)\n", (int)st);
+      WiFi.disconnect();
+      WiFi.begin();
+      wifiTryAt = millis();
+    }
   }
 
   const bool up = WiFi.status() == WL_CONNECTED;
