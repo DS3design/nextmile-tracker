@@ -7,6 +7,9 @@
 
 namespace net {
 
+void (*pumpFn)() = nullptr;
+void setPump(void (*fn)()) { pumpFn = fn; }
+
 int call(const Req& r, JsonDocument& doc) {
   WiFiClientSecure client;
   client.setCACert(ROOT_CAS);
@@ -30,6 +33,7 @@ int call(const Req& r, JsonDocument& doc) {
     if (e && e != DeserializationError::EmptyInput) code = -2;
   }
   http.end();
+  if (pumpFn) pumpFn();
   return code;
 }
 
@@ -54,6 +58,7 @@ int callText(const Req& r, String& body, String* contentType, String* session) {
     if (session) *session = http.header("Mcp-Session-Id");
   }
   http.end();
+  if (pumpFn) pumpFn();
   return code;
 }
 

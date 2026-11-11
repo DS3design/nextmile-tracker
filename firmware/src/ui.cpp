@@ -156,6 +156,12 @@ void formatMiles(char* out, size_t n, float miles, int decimals) {
   out[o] = 0;
 }
 
+const char* noun(uint8_t kinds, bool plural) {
+  if (kinds == 2) return plural ? "WALKS" : "WALK";
+  if (kinds == 3) return plural ? "ACTIVITIES" : "ACTIVITY";
+  return plural ? "RUNS" : "RUN";
+}
+
 void main(lgfx::LovyanGFX& g, const UiData& d) {
   g.fillScreen(c(g, BLACK));
   const float miles = d.ytd_m / 1609.344f;
@@ -171,7 +177,7 @@ void main(lgfx::LovyanGFX& g, const UiData& d) {
   header(g, d.athlete[0] ? d.athlete : "Next Mile Tracker", d.wifi_ok, wx);
 
   char lbl[64];
-  snprintf(lbl, sizeof lbl, "MILES IN %d  -  %u RUN%s", d.year, d.ytd_runs, d.ytd_runs == 1 ? "" : "S");
+  snprintf(lbl, sizeof lbl, "MILES IN %d  -  %u %s", d.year, d.ytd_runs, noun(d.kinds, d.ytd_runs != 1));
   text(g, &f_label, GREY, BLACK, top_center, lbl, 160, 123);
 
   // goal bar
@@ -211,7 +217,7 @@ void main(lgfx::LovyanGFX& g, const UiData& d) {
     g.setFont(&f_label);
     int dw = g.textWidth(dateU);
     char name[64];
-    snprintf(name, sizeof name, "LAST RUN  -  %s", d.last.name);
+    snprintf(name, sizeof name, "LAST %s  -  %s", noun(d.kinds, false), d.last.name);
     char nameU[64];
     upper(nameU, sizeof nameU, name);
     fit(g, &f_label, nameU, pw - 24 - dw - 10);
@@ -234,8 +240,12 @@ void main(lgfx::LovyanGFX& g, const UiData& d) {
     text(g, &f_mid, WHITE, PANEL, top_center, pace, px + pw / 2 + 6, py + 22);
     text(g, &f_mid, WHITE, PANEL, top_right, dur, px + pw - 10, py + 22);
   } else {
-    text(g, &f_label, GREY, PANEL, top_left, "LAST RUN", px + 10, py + 5);
-    text(g, &f_mid, WHITE, PANEL, top_left, "No runs yet this year. Go get one!", px + 10, py + 22);
+    char ln[24];
+    snprintf(ln, sizeof ln, "LAST %s", noun(d.kinds, false));
+    text(g, &f_label, GREY, PANEL, top_left, ln, px + 10, py + 5);
+    const char* none = d.kinds == 2 ? "No walks yet this year. Go get one!" : d.kinds == 3 ? "Nothing yet this year. Get moving!"
+                                                                                        : "No runs yet this year. Go get one!";
+    text(g, &f_mid, WHITE, PANEL, top_left, none, px + 10, py + 22);
   }
   if (d.sync_error) g.fillCircle(312, 232, 3, c(g, RED));
 }

@@ -24,6 +24,7 @@ struct UiData {
   int last_year = 2025;
   float last_year_mi = 0;
   RunInfo last;
+  uint8_t kinds = 1;  // 1 runs, 2 walks and hikes, 3 both
   bool wifi_ok = true;
   bool sync_error = false;
   const char* source = "STRAVA";

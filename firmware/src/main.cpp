@@ -12,6 +12,7 @@
 #include "board.h"
 #include "activities.h"
 #include "extras.h"
+#include "net.h"
 #include "ota.h"
 #include "source.h"
 #include "ui.h"
@@ -40,7 +41,7 @@ bool dirty = true;
 bool portalActive = false, netUp = false, everConnected = false;
 bool wantFull = true, wantRecent = false, wantPortal = false, wantReset = false, needRelink = false;
 uint32_t lastFull = 0, lastRecent = 0, lastSyncAt = 0, backoffUntil = 0, bootMs = 0;
-bool syncedOnce = false;
+bool syncedOnce = false, syncing = false, loadingShown = false, bootSync = true;
 src::Result lastResult = src::OK;
 
 bool pressed = false;
@@ -155,7 +156,7 @@ void loadSettings() {
   c.tzManual = prefs.getBool("tzm", false);
   c.goalMi = prefs.getFloat("goal", 0);
   c.bright = prefs.getUChar("bright", 200);
-  c.walks = prefs.getBool("walks", false);
+  c.kinds = prefs.getUChar("kinds", prefs.getBool("walks", false) ? 3 : 1);
   c.theme = prefs.getUChar("theme", 0);
   c.autoDim = prefs.getBool("adim", true);
   c.led = prefs.getUChar("led", 1);
@@ -234,6 +235,12 @@ void updatePace() {
   extras::setAhead(d.goal_mi > 0 && d.ytd_m / 1609.344f >= d.goal_mi * frac);
 }
 
+void drawLoading() {
+  ui::message(lcd, "Loading your miles...", "Adding up this year so far.", "This can take a minute.");
+  shown = Screen::None;
+  loadingShown = true;
+}
+
 void maybeSync() {
   if (!src::linked() || needRelink || !netUp || !timeValid()) return;
   uint32_t now = millis();
@@ -243,22 +250,35 @@ void maybeSync() {
   const int prevYear = t.year, prevRuns = t.runs;
   const float prevMi = t.meters / 1609.344f;
   const bool hadData = syncedOnce;
+  if (bootSync) {  // a full re-read of the year at every power-up is slow, so skip it if one ran today
+    bootSync = false;
+    uint32_t at = prefs.getUInt("fullAt", 0);
+    if (wantFull && t.year == y && at && (uint32_t)time(nullptr) - at < FULL_EVERY_MS / 1000) {
+      wantFull = false;
+      wantRecent = true;
+      lastFull = now;
+    }
+  }
   bool full = wantFull || t.year != y || now - lastFull > FULL_EVERY_MS;
   bool recent = wantRecent || now - lastRecent > RECENT_EVERY_MS;
   bool lastYear = t.lastYear != y - 1;
   if (!full && !recent && !lastYear) return;
 
   if (t.year == 0 && shown != Screen::Info) {
-    ui::message(lcd, "Loading your runs...", "Adding up this year's miles.", nullptr);
-    shown = Screen::None;
+    drawLoading();
   }
   src::Result r = src::OK;
-  if (full || recent) r = src::sync(y, full, app::cfg.walks);
-  if (r == src::OK && acts::totals().lastYear != y - 1) r = src::syncLastYear(y - 1, app::cfg.walks);
+  syncing = true;
+  if (full || recent) r = src::sync(y, full, app::cfg.kinds);
+  if (r == src::OK && acts::totals().lastYear != y - 1) r = src::syncLastYear(y - 1, app::cfg.kinds);
+  syncing = loadingShown = false;
 
   lastResult = r;
   if (r == src::OK) {
-    if (full) lastFull = now;
+    if (full) {
+      lastFull = now;
+      prefs.putUInt("fullAt", (uint32_t)time(nullptr));
+    }
     lastRecent = now;
     lastSyncAt = now;
     syncedOnce = true;
@@ -398,6 +418,24 @@ void handleTouch() {
   }
 }
 
+// Runs between web requests during a sync, so touch, the light and the screen keep working.
+void syncPump() {
+  if (!syncing) return;
+  static int prevHold = -1;
+  handleTouch();
+  extras::loop(false);
+  applyBacklight();
+  const int was = prevHold;
+  prevHold = holdShown;
+  if (holdShown >= 0) return;
+  if (loadingShown) {
+    if (was >= 0) drawLoading();
+    return;
+  }
+  Screen want = baseScreen();
+  if (want != shown || dirty) draw(want);
+}
+
 }  // namespace
 
 namespace app {
@@ -410,7 +448,7 @@ void saveSettings() {
   prefs.putBool("tzm", cfg.tzManual);
   prefs.putFloat("goal", cfg.goalMi);
   prefs.putUChar("bright", cfg.bright);
-  prefs.putBool("walks", cfg.walks);
+  prefs.putUChar("kinds", cfg.kinds);
   prefs.putUChar("theme", cfg.theme);
   prefs.putBool("adim", cfg.autoDim);
   prefs.putUChar("led", cfg.led);
@@ -426,10 +464,11 @@ void applyTz() {
   setenv("TZ", cfg.tz.c_str(), 1);
   tzset();
   wantFull = true;
+  bootSync = false;
 }
 
 void requestSync(bool full) {
-  if (full) wantFull = true;
+  if (full) wantFull = true, bootSync = false;
   else wantRecent = true;
   backoffUntil = 0;
   dirty = true;
@@ -440,6 +479,7 @@ void requestPortal() { wantPortal = true; }
 void requestReset() { wantReset = true; }
 
 void onLinked() {
+  bootSync = false;
   needRelink = false;
   wantFull = true;
   backoffUntil = 0;
@@ -481,6 +521,7 @@ UiData uiData() {
   d.ytd_m = current ? t.meters : 0;
   d.ytd_runs = current ? t.runs : 0;
   if (current) d.last = t.last;
+  d.kinds = cfg.kinds;
   d.last_year = d.year - 1;
   d.last_year_mi = t.lastYear == d.year - 1 ? t.lastYearMeters / 1609.344f : 0;
   if (cfg.goalMi > 0) {
@@ -514,6 +555,7 @@ void setup() {
   ui::init();
 
   ota::begin();
+  net::setPump(syncPump);
   prefs.begin("app", false);
   loadSettings();
   extras::begin();

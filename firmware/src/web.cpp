@@ -80,7 +80,10 @@ void handleRoot() {
   b += F("</div><div class=big>");
   b += miles(t.meters);
   b += F(" mi</div><div class=dim>");
-  b += String(d.year) + " &middot; " + t.runs + (t.runs == 1 ? " run" : " runs");
+  b += String(d.year) + " &middot; " + t.runs + " " +
+       (app::cfg.kinds == 2 ? (t.runs == 1 ? "walk" : "walks")
+        : app::cfg.kinds == 3 ? (t.runs == 1 ? "activity" : "activities")
+                              : (t.runs == 1 ? "run" : "runs"));
   uint32_t ago = app::lastSyncAgoS();
   b += ago == UINT32_MAX ? String(" &middot; not synced yet") : " &middot; synced " + String(ago / 60) + " min ago";
   const extras::Weather& w = extras::weather();
@@ -115,9 +118,12 @@ void handleRoot() {
   b += esc(app::cfg.name);
   b += F("'><label>Brightness</label><input type=range name=bright min=20 max=255 value=");
   b += String(app::cfg.bright);
-  b += F("><label class=row><input type=checkbox name=walks value=1");
-  if (app::cfg.walks) b += F(" checked");
-  b += F("> Count walks and hikes too</label><label>Colors</label><select name=theme>");
+  b += F("><label>Count my</label>");
+  static const char* const KINDS[] = {"Runs", "Walks and hikes", "Runs, walks and hikes"};
+  for (int i = 1; i <= 3; i++)
+    b += "<label class=row><input type=radio name=kinds value=" + String(i) + (app::cfg.kinds == i ? " checked> " : "> ") +
+         KINDS[i - 1] + "</label>";
+  b += F("<label>Colors</label><select name=theme>");
   for (int i = 0; i < ui::themeCount(); i++)
     b += "<option value=" + String(i) + (i == app::cfg.theme ? " selected>" : ">") + ui::themeName(i) + "</option>";
   b += F("</select><div class=dim>Or tap the tracker's screen, then tap Colors to cycle through them.</div>"
@@ -166,7 +172,8 @@ void handleSave() {
   else c.goalMi = 0;
   int br = server.arg("bright").toInt();
   if (br >= 20 && br <= 255) c.bright = br;
-  bool walks = server.hasArg("walks");
+  int kinds = server.arg("kinds").toInt();
+  if (kinds < 1 || kinds > 3) kinds = c.kinds;
   String tz = server.arg("tz");
   bool tzChanged = tz.length() && tz != c.tz;
   if (tzChanged) {
@@ -174,8 +181,8 @@ void handleSave() {
     c.tzManual = true;
     app::applyTz();
   }
-  bool resync = tzChanged || walks != c.walks;
-  c.walks = walks;
+  bool resync = tzChanged || kinds != c.kinds;
+  c.kinds = kinds;
   int th = server.hasArg("theme") ? server.arg("theme").toInt() : -1;
   if (th >= 0 && th < ui::themeCount()) {
     c.theme = th;
@@ -247,7 +254,19 @@ void linkedPage() {
   app::onLinked();
   String n = esc(src::athleteName());
   sendPage("You're all set", "<p>Linked to " + String(src::label(src::kind())) + (n.length() ? " as <b>" + n + "</b>" : String("")) +
-                                 ". Your tracker is loading this year's runs now.</p><a class='btn ghost' href=/>Goal &amp; settings</a>");
+                                 ". Your tracker is loading this year's miles now.</p>" +
+                                 (n.length() ? String()
+                                             : String(F("<form method=post action=/name><label>Your name for the screen</label>"
+                                                        "<input type=text name=name maxlength=30 autocomplete=given-name>"
+                                                        "<button>Save name</button></form>"))) +
+                                 "<a class='btn ghost' href=/>Goal &amp; settings</a>");
+}
+
+void handleName() {
+  app::cfg.name = server.arg("name");
+  app::cfg.name.trim();
+  app::saveSettings();
+  redirect("/");
 }
 
 void handleIntervals() {
@@ -355,6 +374,7 @@ void begin() {
   if (running) return;
   server.on("/", HTTP_GET, handleRoot);
   server.on("/save", HTTP_POST, handleSave);
+  server.on("/name", HTTP_POST, handleName);
   server.on("/link", HTTP_GET, handleLink);
   server.on("/go", HTTP_GET, handleGo);
   server.on("/exchange", HTTP_GET, handleExchange);

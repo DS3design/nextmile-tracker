@@ -12,7 +12,7 @@ struct Settings {
   bool tzManual = false;  // picked on the settings page, so linking won't overwrite it
   float goalMi = 0;       // 0 = beat last year
   uint8_t bright = 200;
-  bool walks = false;     // count walks and hikes too
+  uint8_t kinds = 1;      // what counts: 1 runs, 2 walks and hikes, 3 both
   uint8_t theme = 0;      // ui colour theme index
   bool autoDim = true;    // dim with the light sensor, off in a dark room
   uint8_t led = 1;        // 0 off, 1 new runs + milestones, 2 also glow when ahead of goal pace

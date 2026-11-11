@@ -246,16 +246,17 @@ src::Result get(const String& url, JsonDocument& doc, JsonDocument* filter = nul
   return fromCode(c);
 }
 
-bool isRun(String t, bool walks) {
+bool isRun(String t, uint8_t kinds) {
   t.toLowerCase();
-  if (t.indexOf("run") >= 0) return true;  // Run, TrailRun, trail_running, RUNNING, TREADMILL_RUNNING...
-  return walks && (t.indexOf("walk") >= 0 || t.indexOf("hik") >= 0);
+  bool run = t.indexOf("run") >= 0;  // Run, TrailRun, trail_running, RUNNING, TREADMILL_RUNNING...
+  bool walk = t.indexOf("walk") >= 0 || t.indexOf("hik") >= 0;
+  return (run && (kinds & 1)) || (walk && (kinds & 2));
 }
 
 // ---- per-source fetchers ----------------------------------------------------
 // Each returns activities; `windowed` tells the caller the list is the latest N (deletions detectable).
 
-src::Result fetchStrava(time_t after, time_t before, int maxPages, bool walks, std::vector<Act>& out) {
+src::Result fetchStrava(time_t after, time_t before, int maxPages, uint8_t kinds, std::vector<Act>& out) {
   for (int page = 1; page <= maxPages; page++) {
     JsonDocument doc;
     String u = String(STRAVA) + "/athlete/activities?per_page=" + (maxPages == 1 ? 30 : 100) + "&page=" + page;
@@ -273,7 +274,7 @@ src::Result fetchStrava(time_t after, time_t before, int maxPages, bool walks, s
       x.local = acts::parseIso(local);
       x.year = atoi(local);
       const char* t = o["sport_type"] | (const char*)nullptr;
-      x.counts = isRun(t ? t : (o["type"] | ""), walks);
+      x.counts = isRun(t ? t : (o["type"] | ""), kinds);
       strlcpy(x.name, o["name"] | "Run", sizeof x.name);
       out.push_back(x);
     }
@@ -282,7 +283,7 @@ src::Result fetchStrava(time_t after, time_t before, int maxPages, bool walks, s
   return src::OK;
 }
 
-src::Result fetchGarmin(const String& from, const String& to, int maxPages, bool walks, std::vector<Act>& out) {
+src::Result fetchGarmin(const String& from, const String& to, int maxPages, uint8_t kinds, std::vector<Act>& out) {
   const int per = maxPages == 1 ? 30 : 100;
   for (int page = 0; page < maxPages; page++) {
     JsonDocument doc;
@@ -300,7 +301,7 @@ src::Result fetchGarmin(const String& from, const String& to, int maxPages, bool
       x.s = mv > 0 ? mv : (o["duration"] | 0.0f);
       x.local = acts::parseIso(local);
       x.year = atoi(local);
-      x.counts = isRun(o["activityType"]["typeKey"] | "", walks);
+      x.counts = isRun(o["activityType"]["typeKey"] | "", kinds);
       strlcpy(x.name, o["activityName"] | "Run", sizeof x.name);
       out.push_back(x);
       if (!name.length()) {
@@ -316,7 +317,7 @@ src::Result fetchGarmin(const String& from, const String& to, int maxPages, bool
   return src::OK;
 }
 
-src::Result fetchPolar(bool walks, std::vector<Act>& out) {
+src::Result fetchPolar(uint8_t kinds, std::vector<Act>& out) {
   JsonDocument doc;
   src::Result r = get(String(POLAR) + "/exercises", doc);
   if (r != src::OK) return r;
@@ -329,7 +330,7 @@ src::Result fetchPolar(bool walks, std::vector<Act>& out) {
     x.local = acts::parseIso(local);
     x.year = atoi(local);
     String sport = o["detailed_sport_info"] | (o["sport"] | "");
-    x.counts = isRun(sport, walks);
+    x.counts = isRun(sport, kinds);
     strlcpy(x.name, sport.indexOf("TRAIL") >= 0 ? "Trail Run" : sport.indexOf("TREADMILL") >= 0 ? "Treadmill Run" : "Run",
             sizeof x.name);
     out.push_back(x);
@@ -337,7 +338,7 @@ src::Result fetchPolar(bool walks, std::vector<Act>& out) {
   return src::OK;
 }
 
-src::Result fetchGoogle(const String& from, const String& to, bool walks, std::vector<Act>& out) {
+src::Result fetchGoogle(const String& from, const String& to, uint8_t kinds, std::vector<Act>& out) {
   String filter = "exercise.interval.civil_start_time >= \"" + from + "\" AND exercise.interval.civil_start_time < \"" + to + "\"";
   String token;
   for (int page = 0; page < 40; page++) {
@@ -357,7 +358,7 @@ src::Result fetchGoogle(const String& from, const String& to, bool walks, std::v
       if (off[0] == '-') x.local -= 2 * (int32_t)parseDuration(off + 1);
       time_t t = x.local;
       x.year = gmtime(&t)->tm_year + 1900;
-      x.counts = isRun(e["exerciseType"] | "", walks);
+      x.counts = isRun(e["exerciseType"] | "", kinds);
       strlcpy(x.name, e["displayName"] | "Run", sizeof x.name);
       out.push_back(x);
     }
@@ -403,7 +404,7 @@ const char* runName(const String& sport, bool counts) {
   return counts ? "Walk" : "Workout";
 }
 
-src::Result fetchIntervals(const String& from, const String& to, bool walks, std::vector<Act>& out) {
+src::Result fetchIntervals(const String& from, const String& to, uint8_t kinds, std::vector<Act>& out) {
   JsonDocument doc;
   src::Result r = get(String(IV_API) + "/activities?oldest=" + from + "&newest=" + to +
                           "&fields=id,start_date_local,type,distance,moving_time,name",
@@ -417,14 +418,14 @@ src::Result fetchIntervals(const String& from, const String& to, bool walks, std
     x.s = o["moving_time"] | 0;
     x.local = acts::parseIso(local);
     x.year = atoi(local);
-    x.counts = isRun(o["type"] | "", walks);
+    x.counts = isRun(o["type"] | "", kinds);
     strlcpy(x.name, o["name"] | runName(o["type"] | "", x.counts), sizeof x.name);
     out.push_back(x);
   }
   return src::OK;
 }
 
-src::Result fetchWhoop(const String& start, const String& end, bool walks, std::vector<Act>& out) {
+src::Result fetchWhoop(const String& start, const String& end, uint8_t kinds, std::vector<Act>& out) {
   String token;
   for (int page = 0; page < 60; page++) {
     JsonDocument doc;
@@ -442,7 +443,7 @@ src::Result fetchWhoop(const String& start, const String& end, bool walks, std::
       x.local = a + tzOffset(o["timezone_offset"] | "");
       setYear(x);
       String sport = o["sport_name"] | "";
-      x.counts = isRun(sport, walks);
+      x.counts = isRun(sport, kinds);
       strlcpy(x.name, runName(sport, x.counts), sizeof x.name);
       out.push_back(x);
     }
@@ -452,7 +453,7 @@ src::Result fetchWhoop(const String& start, const String& end, bool walks, std::
   return src::OK;
 }
 
-src::Result fetchOura(const String& from, const String& to, bool walks, std::vector<Act>& out) {
+src::Result fetchOura(const String& from, const String& to, uint8_t kinds, std::vector<Act>& out) {
   String token;
   for (int page = 0; page < 40; page++) {
     JsonDocument doc;
@@ -470,7 +471,7 @@ src::Result fetchOura(const String& from, const String& to, bool walks, std::vec
       x.local = a;  // already local wall clock
       x.year = atoi(st);
       String sport = o["activity"] | "";
-      x.counts = isRun(sport, walks);
+      x.counts = isRun(sport, kinds);
       strlcpy(x.name, runName(sport, x.counts), sizeof x.name);
       out.push_back(x);
     }
@@ -481,7 +482,7 @@ src::Result fetchOura(const String& from, const String& to, bool walks, std::vec
 }
 
 // Withings workout categories: 1 walk, 2 run, 3 hiking.
-src::Result fetchWithings(const String& from, const String& to, bool walks, std::vector<Act>& out) {
+src::Result fetchWithings(const String& from, const String& to, uint8_t kinds, std::vector<Act>& out) {
   src::Result r = ensureToken(false);
   if (r != src::OK) return r;
   int offset = 0;
@@ -515,7 +516,7 @@ src::Result fetchWithings(const String& from, const String& to, bool walks, std:
       x.local = (int32_t)(acts::daysFromCivil(lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday) * 86400 + lt.tm_hour * 3600 +
                           lt.tm_min * 60 + lt.tm_sec);
       x.year = lt.tm_year + 1900;
-      x.counts = cat == 2 || (walks && (cat == 1 || cat == 3));
+      x.counts = ((kinds & 1) && cat == 2) || ((kinds & 2) && (cat == 1 || cat == 3));
       strlcpy(x.name, cat == 2 ? "Run" : cat == 3 ? "Hike" : cat == 1 ? "Walk" : "Workout", sizeof x.name);
       out.push_back(x);
     }
@@ -529,7 +530,7 @@ float num(JsonVariantConst v) { return v.is<const char*>() ? atof(v.as<const cha
 
 // Wahoo workout_type_id: 1 running, 3 track, 4 trail, 5 treadmill; 6-8 walking, 9 hiking.
 // The list is newest first and has no date filter, so page back until we pass `from`.
-src::Result fetchWahoo(time_t from, time_t to, bool walks, std::vector<Act>& out) {
+src::Result fetchWahoo(time_t from, time_t to, uint8_t kinds, std::vector<Act>& out) {
   JsonDocument filter;
   JsonObject f = filter["workouts"][0].to<JsonObject>();
   f["id"] = f["starts"] = f["name"] = f["workout_type_id"] = true;
@@ -560,7 +561,7 @@ src::Result fetchWahoo(time_t from, time_t to, bool walks, std::vector<Act>& out
       x.local = (int32_t)(acts::daysFromCivil(lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday) * 86400 + lt.tm_hour * 3600 +
                           lt.tm_min * 60 + lt.tm_sec);
       x.year = lt.tm_year + 1900;
-      x.counts = run || (walks && walk);
+      x.counts = ((kinds & 1) && run) || ((kinds & 2) && walk);
       const char* def = t == 5 ? "Treadmill Run" : t == 4 ? "Trail Run" : run ? "Run" : t == 9 ? "Hike" : walk ? "Walk" : "Workout";
       const char* n = o["name"] | "";
       strlcpy(x.name, *n ? n : def, sizeof x.name);
@@ -571,17 +572,17 @@ src::Result fetchWahoo(time_t from, time_t to, bool walks, std::vector<Act>& out
   return src::OK;
 }
 
-src::Result fetchRange(time_t from, time_t to, bool walks, std::vector<Act>& out) {
+src::Result fetchRange(time_t from, time_t to, uint8_t kinds, std::vector<Act>& out) {
   src::Result r = src::OK;
   switch (k) {
     case src::INTERVALS:
       for (time_t a = from; a <= to && r == src::OK; a += 91 * 86400)
-        r = fetchIntervals(localDay(a), localDay(std::min(to, a + 90 * 86400)), walks, out);
+        r = fetchIntervals(localDay(a), localDay(std::min(to, a + 90 * 86400)), kinds, out);
       return r;
-    case src::WHOOP: return fetchWhoop(isoUtc(from - 86400), isoUtc(to + 86400), walks, out);
-    case src::OURA: return fetchOura(localDay(from), localDay(to + 86400), walks, out);
-    case src::WITHINGS: return fetchWithings(localDay(from), localDay(to), walks, out);
-    case src::WAHOO: return fetchWahoo(from, to + 86400, walks, out);
+    case src::WHOOP: return fetchWhoop(isoUtc(from - 86400), isoUtc(to + 86400), kinds, out);
+    case src::OURA: return fetchOura(localDay(from), localDay(to + 86400), kinds, out);
+    case src::WITHINGS: return fetchWithings(localDay(from), localDay(to), kinds, out);
+    case src::WAHOO: return fetchWahoo(from, to + 86400, kinds, out);
     default: return src::CONFIG;
   }
 }
@@ -664,7 +665,7 @@ const char* corosName(int code) {
 // querySportRecords answers in text:
 //   1. Trail Run(102) — 2026-10-03
 //      Duration: 2:12:38 | Distance: 12.03 km
-void parseCoros(const String& t, bool walks, std::vector<Act>& out) {
+void parseCoros(const String& t, uint8_t kinds, std::vector<Act>& out) {
   std::vector<String> keys;
   size_t first = out.size();
   int p = 0;
@@ -699,7 +700,7 @@ void parseCoros(const String& t, bool walks, std::vector<Act>& out) {
       if ((int)line.length() > di + 15 && line[di + 10] == ' ' && isdigit(line[di + 11])) when += " " + line.substring(di + 11, di + 16) + ":00";
       x.local = acts::parseIso(when.c_str());
       x.year = atoi(when.c_str());
-      x.counts = (code >= 100 && code <= 103) || isRun(label, walks) || (walks && code == 104);
+      x.counts = ((kinds & 1) && code >= 100 && code <= 103) || ((kinds & 2) && code == 104) || isRun(label, kinds);
       const char* known = corosName(code);
       strlcpy(x.name, known ? known : (label.length() ? label.c_str() : "Run"), sizeof x.name);
       out.push_back(x);
@@ -724,7 +725,7 @@ void parseCoros(const String& t, bool walks, std::vector<Act>& out) {
   for (size_t i = 0; i < keys.size(); i++) out[first + i].id = hash64(keys[i].c_str());
 }
 
-src::Result corosRecords(const String& from, const String& to, bool walks, std::vector<Act>& out) {
+src::Result corosRecords(const String& from, const String& to, uint8_t kinds, std::vector<Act>& out) {
   String body = "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"querySportRecords\","
                 "\"arguments\":{\"startDate\":\"" + from + "\",\"endDate\":\"" + to + "\",\"limit\":50}}}";
   JsonDocument d;
@@ -734,7 +735,7 @@ src::Result corosRecords(const String& from, const String& to, bool walks, std::
   if (res["isError"] | false) return src::NET;
   String text;
   for (JsonObject c : res["content"].as<JsonArray>()) text += String(c["text"] | "") + "\n";
-  parseCoros(text, walks, out);
+  parseCoros(text, kinds, out);
   return src::OK;
 }
 
@@ -745,7 +746,7 @@ String ymdc(int y, int m, int d) {
 }
 
 // Half-month windows (50 records each) from `from` through `to`, local dates.
-src::Result fetchCoros(time_t from, time_t to, bool walks, std::vector<Act>& out) {
+src::Result fetchCoros(time_t from, time_t to, uint8_t kinds, std::vector<Act>& out) {
   src::Result r = ensureToken(false);
   if (r != src::OK) return r;
   r = corosSession();
@@ -762,7 +763,7 @@ src::Result fetchCoros(time_t from, time_t to, bool walks, std::vector<Act>& out
   while (y < ey || (y == ey && (mo < em || (mo == em && half <= ehalf)))) {
     static const uint8_t days[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
     int last = days[mo - 1] + (mo == 2 && ((y % 4 == 0 && y % 100) || y % 400 == 0));
-    r = corosRecords(ymdc(y, mo, half ? 16 : 1), ymdc(y, mo, half ? last : 15), walks, out);
+    r = corosRecords(ymdc(y, mo, half ? 16 : 1), ymdc(y, mo, half ? last : 15), kinds, out);
     if (r != src::OK) return r;
     if (half && ++mo > 12) mo = 1, y++;
     half = !half;
@@ -995,7 +996,7 @@ Result applePush(const String& token, const String& json) {
   return OK;
 }
 
-Result sync(int year, bool full, bool walks) {
+Result sync(int year, bool full, uint8_t kinds) {
   if (!linked()) return AUTH;
   if (k == APPLE) return OK;  // pushed from the iPhone
   if (acts::totals().year != year) full = true;
@@ -1003,16 +1004,16 @@ Result sync(int year, bool full, bool walks) {
   Result r;
   switch (k) {
     case STRAVA:
-      r = full ? fetchStrava(acts::localYearStart(year) - 86400, 0, 30, walks, v) : fetchStrava(0, 0, 1, walks, v);
+      r = full ? fetchStrava(acts::localYearStart(year) - 86400, 0, 30, kinds, v) : fetchStrava(0, 0, 1, kinds, v);
       break;
     case GARMIN:
-      r = full ? fetchGarmin(ymd(year, 1, 1), ymd(year, 12, 31), 30, walks, v) : fetchGarmin("", "", 1, walks, v);
+      r = full ? fetchGarmin(ymd(year, 1, 1), ymd(year, 12, 31), 30, kinds, v) : fetchGarmin("", "", 1, kinds, v);
       break;
     case GOOGLE: {
       time_t from = full ? acts::localYearStart(year) : time(nullptr) - 30 * 86400;
       struct tm t;
       localtime_r(&from, &t);
-      r = fetchGoogle(ymd(t.tm_year + 1900, t.tm_mon + 1, t.tm_mday), ymd(year + 1, 1, 1), walks, v);
+      r = fetchGoogle(ymd(t.tm_year + 1900, t.tm_mon + 1, t.tm_mday), ymd(year + 1, 1, 1), kinds, v);
       if (r == OK && !full) {
         acts::mergeWindow(year, v);
         return OK;
@@ -1021,7 +1022,7 @@ Result sync(int year, bool full, bool walks) {
     }
     case COROS: {
       time_t now = time(nullptr);
-      r = fetchCoros(full ? acts::localYearStart(year) : now - 30 * 86400, now, walks, v);
+      r = fetchCoros(full ? acts::localYearStart(year) : now - 30 * 86400, now, kinds, v);
       if (r == OK && !full) {
         acts::mergeWindow(year, v);
         return OK;
@@ -1034,7 +1035,7 @@ Result sync(int year, bool full, bool walks) {
     case WITHINGS:
     case WAHOO: {
       time_t now = time(nullptr);
-      r = fetchRange(full ? acts::localYearStart(year) : now - 30 * 86400, now, walks, v);
+      r = fetchRange(full ? acts::localYearStart(year) : now - 30 * 86400, now, kinds, v);
       if (r == OK && !full) {
         acts::mergeWindow(year, v);
         return OK;
@@ -1042,7 +1043,7 @@ Result sync(int year, bool full, bool walks) {
       break;
     }
     case POLAR:
-      r = fetchPolar(walks, v);
+      r = fetchPolar(kinds, v);
       if (r == OK) acts::merge(year, v);
       return r;
     default: return CONFIG;
@@ -1053,7 +1054,7 @@ Result sync(int year, bool full, bool walks) {
   return OK;
 }
 
-Result syncLastYear(int year, bool walks) {
+Result syncLastYear(int year, uint8_t kinds) {
   if (!linked()) return AUTH;
   if (!hasHistory()) {
     acts::setLastYear(year, acts::totals().lastYear == year ? acts::totals().lastYearMeters : 0);
@@ -1061,12 +1062,12 @@ Result syncLastYear(int year, bool walks) {
   }
   std::vector<Act> v;
   Result r;
-  if (k == STRAVA) r = fetchStrava(acts::localYearStart(year) - 86400, acts::localYearStart(year + 1) + 86400, 30, walks, v);
-  else if (k == GARMIN) r = fetchGarmin(ymd(year, 1, 1), ymd(year, 12, 31), 30, walks, v);
+  if (k == STRAVA) r = fetchStrava(acts::localYearStart(year) - 86400, acts::localYearStart(year + 1) + 86400, 30, kinds, v);
+  else if (k == GARMIN) r = fetchGarmin(ymd(year, 1, 1), ymd(year, 12, 31), 30, kinds, v);
   else if (k == INTERVALS || k == WHOOP || k == OURA || k == WITHINGS || k == WAHOO)
-    r = fetchRange(acts::localYearStart(year), acts::localYearStart(year + 1) - 86400, walks, v);
-  else if (k == COROS) r = fetchCoros(acts::localYearStart(year), acts::localYearStart(year + 1) - 86400, walks, v);
-  else r = fetchGoogle(ymd(year, 1, 1), ymd(year + 1, 1, 1), walks, v);
+    r = fetchRange(acts::localYearStart(year), acts::localYearStart(year + 1) - 86400, kinds, v);
+  else if (k == COROS) r = fetchCoros(acts::localYearStart(year), acts::localYearStart(year + 1) - 86400, kinds, v);
+  else r = fetchGoogle(ymd(year, 1, 1), ymd(year + 1, 1, 1), kinds, v);
   if (r != OK) return r;
   float m = 0;
   for (const Act& a : v)

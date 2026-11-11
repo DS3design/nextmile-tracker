@@ -27,8 +27,8 @@ String appleToken();
 Result applePush(const String& token, const String& json);
 void linkApple();
 
-Result sync(int year, bool full, bool walks);
-Result syncLastYear(int year, bool walks);
+Result sync(int year, bool full, uint8_t kinds);
+Result syncLastYear(int year, uint8_t kinds);
 void unlink();
 const char* describe(Result r);
 

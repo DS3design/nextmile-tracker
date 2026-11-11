@@ -19,4 +19,5 @@ int call(const Req& r, JsonDocument& doc);
 // Raw variant (COROS MCP): body returned as text, plus the Content-Type and Mcp-Session-Id response headers.
 int callText(const Req& r, String& body, String* contentType, String* session);
 String urlEncode(const String& s);
+void setPump(void (*fn)());  // called after each request so the screen stays responsive during long syncs
 }  // namespace net
