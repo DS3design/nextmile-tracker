@@ -316,7 +316,7 @@ void info(lgfx::LovyanGFX& g, const char* url, const char* ip, const char* ssid,
   text(g, &f_label, WHITE, PANEL, middle_center, ledAlways ? "LIGHT: ALWAYS ON" : "LIGHT: NEW MILES", 233,
        THEME_BTN_Y + THEME_BTN_H / 2);
   text(g, &f_label, DIM, BLACK, top_center, "HOLD 10 SECONDS TO ERASE & START OVER", 160, 204);
-  text(g, &f_label, DIM, BLACK, top_center, "TAP A BUTTON TO CHANGE IT, ELSEWHERE TO GO BACK", 160, 222);
+  text(g, &f_label, DIM, BLACK, top_center, "TAP ANYWHERE ELSE TO GO BACK", 160, 222);
 }
 
 void resetHold(lgfx::LovyanGFX& g, int secondsLeft) {
