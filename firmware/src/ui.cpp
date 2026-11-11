@@ -283,18 +283,33 @@ void main(lgfx::LovyanGFX& g, const UiData& d) {
 }
 
 namespace {
-const int LIST_Y = 64, ROW_H = 36, BTN_Y = 206, BTN_H = 28;
-const int KB_Y = 56, KEY_H = 36, KB_BOTTOM_Y = 200;
-const char* const KB_ROWS[3][4] = {
-    {"1234567890", "qwertyuiop", "asdfghjkl@", "zxcvbnm.-_"},
-    {"1234567890", "QWERTYUIOP", "ASDFGHJKL@", "ZXCVBNM.-_"},
-    {"!#$%^&*()+", "=[]{}\\|;:'", "\"<>,?/~`", "0123456789"},
+const int LIST_Y = 62, ROW_H = 42, BTN_Y = 192, BTN_H = 44;
+// Phone-style keyboard sized for a finger: 4 rows of 47 px under a 48 px top bar.
+const int KB_Y = 50, KEY_H = 47;
+const char* const KB_ROWS[4][3] = {
+    {"qwertyuiop", "asdfghjkl", "zxcvbnm"},
+    {"QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"},
+    {"1234567890", "-/:;()$&@\"", ".,?!'"},
+    {"[]{}#%^*+=", "_\\|~<>`", ".,?!'"},
 };
 struct Key { int x, y, w, h, code; };
-// Bottom row: shift, symbols, space, delete, connect.
-const Key KB_BOTTOM[] = {{0, KB_BOTTOM_Y, 64, 38, ui::KB_SHIFT}, {64, KB_BOTTOM_Y, 60, 38, ui::KB_SYM},
-                         {124, KB_BOTTOM_Y, 76, 38, ' '}, {200, KB_BOTTOM_Y, 52, 38, ui::KB_DEL},
-                         {252, KB_BOTTOM_Y, 68, 38, ui::KB_OK}};
+
+int layout(int layer, Key* out) {
+  int n = 0;
+  for (int r = 0; r < 3; r++) {
+    const char* row = KB_ROWS[layer][r];
+    const int len = strlen(row), y = KB_Y + r * KEY_H;
+    const int w = r < 2 ? 32 : 224 / len, x0 = r < 2 ? (320 - w * len) / 2 : 48;
+    for (int i = 0; i < len; i++) out[n++] = {x0 + i * w, y, w, KEY_H, row[i]};
+  }
+  const int y2 = KB_Y + 2 * KEY_H, y3 = KB_Y + 3 * KEY_H;
+  out[n++] = {0, y2, 48, KEY_H, ui::KB_SHIFT};
+  out[n++] = {272, y2, 48, KEY_H, ui::KB_DEL};
+  out[n++] = {0, y3, 72, KEY_H, ui::KB_SYM};
+  out[n++] = {72, y3, 120, KEY_H, ' '};
+  out[n++] = {192, y3, 128, KEY_H, ui::KB_OK};
+  return n;
+}
 
 void button(lgfx::LovyanGFX& g, int x, int y, int w, int h, const char* label, uint32_t bg, uint32_t fg) {
   g.fillRoundRect(x, y, w, h, 6, c(g, bg));
@@ -302,37 +317,28 @@ void button(lgfx::LovyanGFX& g, int x, int y, int w, int h, const char* label, u
 }
 
 bool keyAt(int x, int y, int layer, Key& k) {
-  if (y >= KB_BOTTOM_Y) {
-    for (const Key& b : KB_BOTTOM)
-      if (x >= b.x && x < b.x + b.w) return k = b, true;
-    return false;
-  }
-  if (y < KB_Y) return false;
-  int r = (y - KB_Y) / KEY_H;
-  if (r > 3) return false;
-  const char* row = KB_ROWS[layer][r];
-  int n = strlen(row), w = 320 / n, x0 = (320 - w * n) / 2;
-  int i = (x - x0) / w;
-  if (x < x0 || i >= n) return false;
-  k = {x0 + i * w, KB_Y + r * KEY_H, w, KEY_H, row[i]};
-  return true;
+  Key ks[48];
+  const int n = layout(layer, ks);
+  for (int i = 0; i < n; i++)
+    if (x >= ks[i].x && x < ks[i].x + ks[i].w && y >= ks[i].y && y < ks[i].y + ks[i].h) return k = ks[i], true;
+  return false;
 }
 
 void drawKey(lgfx::LovyanGFX& g, const Key& k, int layer, bool down) {
   const char* label;
   char ch[2] = {(char)k.code, 0};
   switch (k.code) {
-    case ui::KB_SHIFT: label = layer == 1 ? "abc" : "ABC"; break;
-    case ui::KB_SYM: label = layer == 2 ? "abc" : "#+="; break;
+    case ui::KB_SHIFT: label = layer == 0 ? "ABC" : layer == 1 ? "abc" : layer == 2 ? "#+=" : "123"; break;
+    case ui::KB_SYM: label = layer < 2 ? "123" : "abc"; break;
     case ui::KB_DEL: label = "DEL"; break;
     case ui::KB_OK: label = "CONNECT"; break;
     case ' ': label = "SPACE"; break;
     default: label = ch;
   }
   bool special = k.code < 0 || k.code == ' ';
-  uint32_t bg = down ? WHITE : k.code == ui::KB_OK ? RED : (special || (k.code == ui::KB_SHIFT && layer == 1)) ? TRACK : PANEL;
+  uint32_t bg = down ? WHITE : k.code == ui::KB_OK ? RED : special ? TRACK : PANEL;
   uint32_t fg = down ? BLACK : (k.code == ui::KB_OK ? 0xFFFFFF : WHITE);
-  g.fillRoundRect(k.x + 1, k.y + 1, k.w - 2, k.h - 2, 4, c(g, bg));
+  g.fillRoundRect(k.x + 1, k.y + 1, k.w - 2, k.h - 2, 5, c(g, bg));
   text(g, special ? &f_label : &f_mid, fg, bg, middle_center, label, k.x + k.w / 2, k.y + k.h / 2);
 }
 }  // namespace
@@ -361,7 +367,7 @@ void wifiList(lgfx::LovyanGFX& g, const WifiNet* nets, int n, int first, bool sc
     fit(g, &f_mid, name, 240);
     text(g, &f_mid, WHITE, PANEL, middle_left, name, 22, y + (ROW_H - 4) / 2);
     int bars = w.rssi > -60 ? 3 : w.rssi > -72 ? 2 : 1;
-    for (int b = 0; b < 3; b++) g.fillRect(278 + b * 7, y + 22 - b * 5 - 6, 5, b * 5 + 6, c(g, b < bars ? WHITE : DIM));
+    for (int b = 0; b < 3; b++) g.fillRect(278 + b * 7, y + 27 - b * 5 - 6, 5, b * 5 + 6, c(g, b < bars ? WHITE : DIM));
   }
   button(g, 12, BTN_Y, 92, BTN_H, "LOOK AGAIN", TRACK, WHITE);
   if (!scanning && n > NET_ROWS) button(g, 114, BTN_Y, 92, BTN_H, first + NET_ROWS < n ? "MORE WIFI" : "BACK TO TOP", TRACK, WHITE);
@@ -369,7 +375,7 @@ void wifiList(lgfx::LovyanGFX& g, const WifiNet* nets, int n, int first, bool sc
 }
 
 int wifiListHit(int x, int y, int n, int first) {
-  if (y >= BTN_Y - 6) {
+  if (y >= BTN_Y - 4) {
     if (x < 109) return LIST_AGAIN;
     if (x < 211) return n > NET_ROWS ? LIST_MORE : LIST_NONE;
     return LIST_PHONE;
@@ -380,32 +386,29 @@ int wifiListHit(int x, int y, int n, int first) {
 }
 
 void wifiPasswordField(lgfx::LovyanGFX& g, const char* pass) {
-  g.fillRoundRect(4, 24, 312, 30, 5, c(g, PANEL));
+  g.fillRoundRect(64, 20, 254, 27, 5, c(g, PANEL));
   g.setFont(&f_mid);
   if (!*pass) {
-    text(g, &f_body, DIM, PANEL, middle_left, "Type your WiFi password", 12, 39);
-    g.fillRect(11, 29, 2, 20, c(g, RED));
+    text(g, &f_body, DIM, PANEL, middle_left, "Type your WiFi password", 72, 33);
+    g.fillRect(70, 23, 2, 21, c(g, RED));
     return;
   }
   const char* p = pass;
-  while (*p && g.textWidth(p) > 290) p++;  // show the end while typing a long one
-  text(g, &f_mid, WHITE, PANEL, middle_left, p, 12, 39);
-  g.fillRect(14 + g.textWidth(p), 29, 2, 20, c(g, RED));
+  while (*p && g.textWidth(p) > 236) p++;  // show the end while typing a long one
+  text(g, &f_mid, WHITE, PANEL, middle_left, p, 72, 33);
+  g.fillRect(74 + g.textWidth(p), 23, 2, 21, c(g, RED));
 }
 
 void wifiKeyboard(lgfx::LovyanGFX& g, int layer) {
   g.fillRect(0, KB_Y, 320, 240 - KB_Y, c(g, BLACK));
-  for (int r = 0; r < 4; r++) {
-    const char* row = KB_ROWS[layer][r];
-    int n = strlen(row), w = 320 / n, x0 = (320 - w * n) / 2;
-    for (int i = 0; i < n; i++) drawKey(g, {x0 + i * w, KB_Y + r * KEY_H, w, KEY_H, row[i]}, layer, false);
-  }
-  for (const Key& b : KB_BOTTOM) drawKey(g, b, layer, false);
+  Key ks[48];
+  const int n = layout(layer, ks);
+  for (int i = 0; i < n; i++) drawKey(g, ks[i], layer, false);
 }
 
 void wifiPassword(lgfx::LovyanGFX& g, const char* ssid, const char* pass, int layer, const char* error) {
   g.fillScreen(c(g, BLACK));
-  button(g, 2, 1, 58, 20, "< BACK", TRACK, WHITE);
+  button(g, 2, 2, 56, 44, "< BACK", TRACK, WHITE);
   char t[64];
   if (error && *error) {
     upper(t, sizeof t, error);
@@ -413,13 +416,13 @@ void wifiPassword(lgfx::LovyanGFX& g, const char* ssid, const char* pass, int la
     snprintf(t, sizeof t, "PASSWORD FOR %s", ssid);
   }
   fit(g, &f_label, t, 250);
-  text(g, &f_label, error && *error ? RED : GREY, BLACK, top_left, t, 68, 3);
+  text(g, &f_label, error && *error ? RED : GREY, BLACK, top_left, t, 66, 2);
   wifiPasswordField(g, pass);
   wifiKeyboard(g, layer);
 }
 
 int wifiKeyHit(int x, int y, int layer) {
-  if (y < 22) return x < 70 ? KB_BACK : KB_NONE;
+  if (y < KB_Y) return x < 62 ? KB_BACK : KB_NONE;
   Key k;
   return keyAt(x, y, layer, k) ? k.code : KB_NONE;
 }
@@ -435,7 +438,7 @@ void wifiPhone(lgfx::LovyanGFX& g, const char* apName, bool failed) {
   text(g, &f_label, RED, BLACK, top_left, failed ? "THAT DIDN'T CONNECT. TRY AGAIN." : "STEP 1 OF 2  -  YOUR HOME WIFI", 12, 44);
   char wifiQr[64];
   snprintf(wifiQr, sizeof wifiQr, "WIFI:T:nopass;S:%s;;", apName);
-  qr(g, wifiQr, 18, 74, 104);
+  qr(g, wifiQr, 18, 68, 104);
   int y = wrap(g, &f_body, WHITE, 140, 68, 172, 19, "Open your phone's camera, point it at this code, and tap Join.");
   wrap(g, &f_body, GREY, 140, y + 8, 172, 19, "A page opens to pick your home WiFi.");
   button(g, 12, BTN_Y, 296, BTN_H, "BACK TO THE WIFI LIST", TRACK, WHITE);

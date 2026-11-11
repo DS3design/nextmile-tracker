@@ -302,6 +302,20 @@ void checkJoin() {
   }
 }
 
+// Lights the key under the finger while it's down, like a phone keyboard; the key types when the finger lifts.
+int keyCode = ui::KB_NONE, keyX = 0, keyY = 0;
+void trackKey() {
+  const int code = ui::wifiKeyHit(touchX, touchY, kbLayer);
+  if (code == keyCode) return;
+  lcd.startWrite();
+  if (keyCode != ui::KB_NONE) ui::wifiKeyFlash(lcd, keyX, keyY, kbLayer, false);
+  if (code != ui::KB_NONE) ui::wifiKeyFlash(lcd, touchX, touchY, kbLayer, true);
+  lcd.endWrite();
+  keyCode = code;
+  keyX = touchX;
+  keyY = touchY;
+}
+
 void setupTap() {
   if (setupView == SetupView::List) {
     const int hit = ui::wifiListHit(touchX, touchY, nets.size(), netFirst);
@@ -327,26 +341,26 @@ void setupTap() {
     return;
   }
   if (setupView == SetupView::Phone) {
-    if (touchY >= 196) setupView = SetupView::List;
+    if (touchY >= 186) setupView = SetupView::List;
     return;
   }
   const int k = ui::wifiKeyHit(touchX, touchY, kbLayer);
+  keyCode = ui::KB_NONE;
   if (k == ui::KB_NONE) return;
   if (k == ui::KB_BACK) {
     setupView = SetupView::List;
     return;
   }
   if (k == ui::KB_OK) {
-    if (pickPass.length()) joinWifi(pickSsid, pickPass);
+    if (pickPass.length()) return joinWifi(pickSsid, pickPass);
+    lcd.startWrite();
+    ui::wifiKeyFlash(lcd, touchX, touchY, kbLayer, false);
+    lcd.endWrite();
     return;
   }
-  lcd.startWrite();
-  ui::wifiKeyFlash(lcd, touchX, touchY, kbLayer, true);
-  lcd.endWrite();
-  delay(70);
   const int was = kbLayer;
-  if (k == ui::KB_SHIFT) kbLayer = kbLayer == 1 ? 0 : 1;
-  else if (k == ui::KB_SYM) kbLayer = kbLayer == 2 ? 0 : 2;
+  if (k == ui::KB_SHIFT) kbLayer = kbLayer < 2 ? kbLayer ^ 1 : kbLayer == 2 ? 3 : 2;
+  else if (k == ui::KB_SYM) kbLayer = kbLayer < 2 ? 2 : 0;
   else if (k == ui::KB_DEL) pickPass.remove(pickPass.length() ? pickPass.length() - 1 : 0);
   else if (pickPass.length() < 63) {
     pickPass += (char)k;
@@ -574,6 +588,7 @@ void handleTouch() {
       extras::dismiss();
       applyBacklight();
     }
+    if (shown == Screen::WifiPass && !swallowTap) trackKey();
     uint32_t held = now - pressStart;
     if (held >= HOLD_RESET_MS) factoryReset();
     if (held >= HOLD_SHOW_MS) {

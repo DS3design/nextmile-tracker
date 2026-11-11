@@ -43,7 +43,7 @@ void init();
 void main(lgfx::LovyanGFX& g, const UiData& d);
 // WiFi setup on the touchscreen: a list of nearby WiFi, then an on-screen keyboard for the password.
 struct WifiNet { char ssid[33]; int rssi; bool open; };
-constexpr int NET_ROWS = 4;
+constexpr int NET_ROWS = 3;
 enum { LIST_NONE = -1, LIST_AGAIN = -2, LIST_MORE = -3, LIST_PHONE = -4 };
 enum { KB_NONE = 0, KB_SHIFT = -1, KB_SYM = -2, KB_DEL = -3, KB_OK = -4, KB_BACK = -5 };
 void wifiList(lgfx::LovyanGFX& g, const WifiNet* nets, int n, int first, bool scanning, const char* error);

@@ -52,6 +52,8 @@ int main() {
   ui::wifiList(s, nets, 5, 4, false, "Couldn't reach DS3DESIGN. Move closer to the router."); save(s, "out/setup_wifi_more.ppm");
   ui::wifiPassword(s, "DS3DESIGN", "", 0, nullptr); save(s, "out/setup_wifi_keys.ppm");
   ui::wifiPassword(s, "DS3DESIGN", "Running2026!", 2, "That password didn't work. Try again."); save(s, "out/setup_wifi_keys_sym.ppm");
+  ui::wifiPassword(s, "DS3DESIGN", "Run", 1, nullptr); save(s, "out/setup_wifi_keys_caps.ppm");
+  ui::wifiPassword(s, "DS3DESIGN", "Run2026", 3, nullptr); save(s, "out/setup_wifi_keys_sym2.ppm");
   ui::wifiPhone(s, "NextMile-Setup", false); save(s, "out/setup_wifi_phone.ppm");
   ui::wifiRetry(s, "Schomer-Home"); save(s, "out/wifi_retry.ppm");
   ui::linkStrava(s, "http://192.168.1.42/link", "192.168.1.42", false); save(s, "out/setup_strava.ppm");
