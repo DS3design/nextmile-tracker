@@ -37,11 +37,13 @@ LED_X, LED_Y = 29.0, 38.0         # RGB LED on the back, front-view coordinates
 
 # ---- case ----
 SIDE, TOP, BOTTOM = 8.0, 8.0, 18.0   # frame borders around the board; engraving lives in the bottom band
+# the screen sits left of the board's centre, so the left border is wider to centre the window on the case
+SIDE_L = PCB_W + SIDE - 2 * VIEW_X - VIEW_W
 R = 4.0                              # corner radius
 CLEAR = 0.6                          # play around board/glass
 BOLT_D, BOLT_INSET = 3.3, 4.2        # M3 through-holes in the frame corners
-OUT_W, OUT_H = PCB_W + 2 * SIDE, PCB_H + TOP + BOTTOM
-BX, BY = SIDE, TOP                   # board origin inside the frame (y down)
+OUT_W, OUT_H = SIDE_L + PCB_W + SIDE, PCB_H + TOP + BOTTOM
+BX, BY = SIDE_L, TOP                   # board origin inside the frame (y down)
 TILT = 15                            # stand lean-back in degrees
 SPACERS = 2                          # extra 3 mm rings behind the board for component clearance
 
@@ -187,7 +189,8 @@ def parts():
 
     # back: reset pinhole, vents, DS3design logo + hint (engraved on the outside face, mirrored back view)
     rst = Point(OUT_W - (BX + RST_X), BY + RST_Y).buffer(1.2, 24)   # mirrored: we see the back from behind
-    vents = [rrect(OUT_W / 2 - 25 + i * 10, BY + 8, 3, 22, 1.5) for i in range(6)]
+    vc = OUT_W - (BX + PCB_W / 2)   # behind the board's centre
+    vents = [rrect(vc - 25 + i * 10, BY + 8, 3, 22, 1.5) for i in range(6)]
     eng = [trace(ds3, opaque, OUT_W / 2 - 20, BY + PCB_H - 6, 40, 12),   # below the LED hole
            text_path('RESET', OUT_W - (BX + RST_X), BY + RST_Y + 6, 2.6),
            text_path('HOLD SCREEN 10 SEC TO ERASE & START OVER', OUT_W / 2, OUT_H - 6, 3.0, spacing=0.08)]
