@@ -78,12 +78,12 @@ void ledLoop() {
     lastAccent = col;
   }
   if ((int32_t)(previewUntil - now) > 0) return ledWrite(col, 1.0f);
-  if (setupMode) return ledWrite(hsv((now % 12000) / 12000.0f), 0.6f);
+  if (setupMode) return ledWrite(hsv((now % 12000) / 12000.0f), 1.0f);
   if (mode == 0 || (app::cfg.autoDim && dark)) return ledWrite(0, 0);
   if (milestoneOn) return ledWrite(col, (now / 150) % 2 ? 1.0f : 0.05f);
-  if (newRunOn && mode == 2) return ledWrite(hsv((now % 12000) / 12000.0f), 0.6f);  // always-on lights celebrate with the rainbow
-  if (newRunOn) return ledWrite(col, 0.1f + 0.9f * (0.5f - 0.5f * cosf(now * 2 * PI / 2500.0f)));
-  if (mode == 2) return ledWrite(col, ahead ? 0.35f : 0.2f);
+  if (newRunOn && mode == 2) return ledWrite(hsv((now % 12000) / 12000.0f), 1.0f);  // always-on lights celebrate with the rainbow
+  if (newRunOn) return ledWrite(col, 0.2f + 0.8f * (0.5f - 0.5f * cosf(now * 2 * PI / 2500.0f)));
+  if (mode == 2) return ledWrite(col, ahead ? 1.0f : 0.6f);
   ledWrite(0, 0);
 }
 

@@ -729,8 +729,8 @@ UiData uiData() {
     d.goal_mi = cfg.goalMi;
     d.goal_auto = false;
   } else {
-    // "Beat last year": last year's miles plus ~10%, rounded up to a tidy number.
-    d.goal_mi = d.last_year_mi > 0 ? ceilf(d.last_year_mi * 1.1f / 10.0f) * 10.0f : 0;
+    // "Beat last year": the goal is exactly last year's miles.
+    d.goal_mi = d.last_year_mi;
     d.goal_auto = true;
   }
   const extras::Weather& w = extras::weather();

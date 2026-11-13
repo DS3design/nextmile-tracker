@@ -42,6 +42,8 @@ int main() {
   ui::main(s, d2); save(s, "out/main_goal_reached.ppm");
   UiData d4 = d; strcpy(d4.athlete, "Don"); d4.ytd_m = 95.8f * 1609.344f; d4.ytd_runs = 91; d4.kinds = 3; d4.goal_mi = 90; d4.goal_auto = true; strcpy(d4.last.name, "Walk");
   ui::main(s, d4); save(s, "out/main_goal_reached_auto.ppm");
+  UiData d5 = d; d5.last_year_mi = 374.4f; d5.goal_mi = 374.4f; d5.ytd_m = 301.7f * 1609.344f; ui::main(s, d5); save(s, "out/main_goal_exact.ppm");
+  d5.ytd_m = 380.2f * 1609.344f; ui::main(s, d5); save(s, "out/main_goal_beat.ppm");
 
   UiData d3; strcpy(d3.athlete, "Alex R."); d3.year = 2027; d3.goal_mi = 0;
   ui::main(s, d3); save(s, "out/main_new_year_no_goal.ppm");

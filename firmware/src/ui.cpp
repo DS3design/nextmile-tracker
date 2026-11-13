@@ -213,8 +213,12 @@ void main(lgfx::LovyanGFX& g, const UiData& d) {
     int fw = (int)(bw * (pct > 1 ? 1 : pct));
     if (fw > 0) g.fillRoundRect(bx, by, fw < bh ? bh : fw, bh, bh / 2, c(g, RED));
     char gm[20], left[64], right[16];
-    formatMiles(gm, sizeof gm, d.goal_mi, 0);
-    if (pct >= 1) {
+    formatMiles(gm, sizeof gm, d.goal_mi, d.goal_auto ? 1 : 0);
+    if (pct >= 1 && d.goal_auto) {
+      char by[20];
+      formatMiles(by, sizeof by, miles - d.goal_mi, 1);
+      snprintf(left, sizeof left, "YOU BEAT %d BY %s MI!", d.last_year, by);
+    } else if (pct >= 1) {
       snprintf(left, sizeof left, "GOAL %s MI  -  REACHED!", gm);
     } else if (d.goal_auto) {
       snprintf(left, sizeof left, "GOAL %s MI  -  BEAT %d", gm, d.last_year);
