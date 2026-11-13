@@ -47,9 +47,10 @@ SPACERS = 2                          # extra 3 mm rings behind the board for com
 
 # ---- stylus: 3 mm shaft, 75 mm long, slides into a tunnel in the bottom band of layer 4 from the left edge ----
 PEN_D, PEN_L = 3.0, 75.0
+PEN_GAP = 4.0                        # tunnel width
 PEN_Y = BY + PCB_H + 6.0             # tunnel centre; clear of the board pocket above and the bolt holes below
 PEN_DEPTH = PEN_L - 5.0              # 5 mm sticks out so it is easy to grab
-PEN_GRIP = 0.3                       # bump on the spring wall that squeezes the shaft
+PEN_PINCH = 0.3                      # at the bump the tunnel is this much narrower than the shaft, so the spring wall squeezes it
 PEN_WALL, PEN_SLOT = 1.2, 0.8        # spring wall thickness and the relief slot behind it
 
 CUT = 'stroke="#ff0000" stroke-width="0.1" fill="none"'
@@ -147,10 +148,10 @@ def usb_notch():
 
 def pen_tunnel():
     """Tunnel with a flared mouth and a sprung bump halfway in that holds the stylus."""
-    top, bot = PEN_Y - PEN_D / 2, PEN_Y + PEN_D / 2
+    top, bot = PEN_Y - PEN_GAP / 2, PEN_Y + PEN_GAP / 2
     mid = PEN_DEPTH / 2
-    a, b, c, d = mid - 9, mid - 5, mid + 5, mid + 9       # ramp up, flat grip, ramp down
-    g = bot - PEN_GRIP
+    a, b, c, d = mid - 11, mid - 5, mid + 5, mid + 11     # ramp up, flat grip, ramp down
+    g = top + PEN_D - PEN_PINCH
     tunnel = Polygon([(-1, top - 0.6), (0, top - 0.5), (2.5, top), (PEN_DEPTH, top), (PEN_DEPTH, bot),
                       (d, bot), (c, g), (b, g), (a, bot), (2.5, bot), (0, bot + 0.5), (-1, bot + 0.6)])
     slot = rrect(a - 3, bot + PEN_WALL, (d + 3) - (a - 3), PEN_SLOT, PEN_SLOT / 2)
