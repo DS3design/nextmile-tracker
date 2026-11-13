@@ -45,6 +45,13 @@ BX, BY = SIDE, TOP                   # board origin inside the frame (y down)
 TILT = 15                            # stand lean-back in degrees
 SPACERS = 2                          # extra 3 mm rings behind the board for component clearance
 
+# ---- stylus: 3 mm shaft, 75 mm long, slides into a tunnel in the bottom band of layer 4 from the left edge ----
+PEN_D, PEN_L = 3.0, 75.0
+PEN_Y = BY + PCB_H + 6.0             # tunnel centre; clear of the board pocket above and the bolt holes below
+PEN_DEPTH = PEN_L - 5.0              # 5 mm sticks out so it is easy to grab
+PEN_GRIP = 0.3                       # bump on the spring wall that squeezes the shaft
+PEN_WALL, PEN_SLOT = 1.2, 0.8        # spring wall thickness and the relief slot behind it
+
 CUT = 'stroke="#ff0000" stroke-width="0.1" fill="none"'
 ENG = 'fill="#000000" fill-rule="evenodd" stroke="none"'
 
@@ -138,6 +145,18 @@ def usb_notch():
     return box(BX + PCB_W - 1, BY + USB_Y - USB_W / 2, OUT_W + 1, BY + USB_Y + USB_W / 2)
 
 
+def pen_tunnel():
+    """Tunnel with a flared mouth and a sprung bump halfway in that holds the stylus."""
+    top, bot = PEN_Y - PEN_D / 2, PEN_Y + PEN_D / 2
+    mid = PEN_DEPTH / 2
+    a, b, c, d = mid - 9, mid - 5, mid + 5, mid + 9       # ramp up, flat grip, ramp down
+    g = bot - PEN_GRIP
+    tunnel = Polygon([(-1, top - 0.6), (0, top - 0.5), (2.5, top), (PEN_DEPTH, top), (PEN_DEPTH, bot),
+                      (d, bot), (c, g), (b, g), (a, bot), (2.5, bot), (0, bot + 0.5), (-1, bot + 0.6)])
+    slot = rrect(a - 3, bot + PEN_WALL, (d + 3) - (a - 3), PEN_SLOT, PEN_SLOT / 2)
+    return [tunnel, slot]
+
+
 def parts():
     P = []
     nm = os.path.join(ROOT, 'assets', 'nextmile_logo.png')
@@ -163,7 +182,7 @@ def parts():
     pcb = box(BX - CLEAR, BY - CLEAR, BX + PCB_W + CLEAR, BY + PCB_H + CLEAR)
     P.append(('3 POCKET', plate(pcb, [usb_notch()]), []))
     for i in range(SPACERS):
-        P.append((f'{4 + i} SPACER', plate(pcb, [usb_notch()]), []))
+        P.append((f'{4 + i} SPACER', plate(pcb, [usb_notch(), *(pen_tunnel() if i == 0 else [])]), []))
 
     # back: reset pinhole, vents, DS3design logo + hint (engraved on the outside face, mirrored back view)
     rst = Point(OUT_W - (BX + RST_X), BY + RST_Y).buffer(1.2, 24)   # mirrored: we see the back from behind
