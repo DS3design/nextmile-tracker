@@ -79,7 +79,9 @@ void ledLoop() {
   }
   if ((int32_t)(previewUntil - now) > 0) return ledWrite(col, 1.0f);
   if (setupMode) return ledWrite(hsv((now % 12000) / 12000.0f), 1.0f);
-  if (mode == 0 || (app::cfg.autoDim && dark)) return ledWrite(0, 0);
+  if (mode == 0) return ledWrite(0, 0);
+  const float k = app::cfg.autoDim && dark ? 0.4f : 1.0f;  // the glow matters most in a dark room, just softer
+  auto ledWrite = [k](uint32_t rgb, float level) { ::ledWrite(rgb, level * k); };
   if (milestoneOn) return ledWrite(col, (now / 150) % 2 ? 1.0f : 0.05f);
   if (newRunOn && mode == 2) return ledWrite(hsv((now % 12000) / 12000.0f), 1.0f);  // always-on lights celebrate with the rainbow
   if (newRunOn) return ledWrite(col, 0.2f + 0.8f * (0.5f - 0.5f * cosf(now * 2 * PI / 2500.0f)));

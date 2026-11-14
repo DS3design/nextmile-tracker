@@ -534,7 +534,7 @@ struct Flake {
   bool drawn;
   lgfx::rgb565_t under[25];
 };
-constexpr int FLAKES = 14;
+constexpr int FLAKES = 22;
 const uint32_t FLAKE_RGB[] = {0xFFC83D, 0xFF5FA2, 0x3DD6FF, 0x6BE36B, 0xFFFFFF, 0};
 const uint8_t FLAKE_SZ[4][2] = {{5, 3}, {3, 5}, {2, 5}, {3, 5}};  // cycling sizes make each flake look like it tumbles
 Flake flakes[FLAKES];
