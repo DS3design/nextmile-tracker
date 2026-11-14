@@ -1,7 +1,9 @@
 #include <string>
 #include "ui.h"
 
+#include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -522,6 +524,85 @@ void resetHold(lgfx::LovyanGFX& g, int secondsLeft) {
   text(g, &f_mid, WHITE, BLACK, top_center, "Keep holding to erase", 160, 140);
   text(g, &f_mid, WHITE, BLACK, top_center, "WiFi, watch link and goal.", 160, 164);
   text(g, &f_body, GREY, BLACK, top_center, "Let go to cancel.", 160, 200);
+}
+
+namespace {
+struct Flake {
+  float x, y, vy, sway, phase;
+  uint32_t rgb;  // 0 = theme accent
+  int16_t dx, dy, w, h;
+  bool drawn;
+  lgfx::rgb565_t under[25];
+};
+constexpr int FLAKES = 14;
+const uint32_t FLAKE_RGB[] = {0xFFC83D, 0xFF5FA2, 0x3DD6FF, 0x6BE36B, 0xFFFFFF, 0};
+const uint8_t FLAKE_SZ[4][2] = {{5, 3}, {3, 5}, {2, 5}, {3, 5}};  // cycling sizes make each flake look like it tumbles
+Flake flakes[FLAKES];
+bool flakesInit = false;
+uint32_t flakesAt = 0;
+
+float frand(float a, float b) { return a + (b - a) * (rand() % 1000) / 1000.0f; }
+
+void spawn(Flake& f, int w, float y) {
+  f.x = frand(6, w - 9);
+  f.y = y;
+  f.vy = frand(9, 20);
+  f.sway = frand(2, 7);
+  f.phase = frand(0, 6.28f);
+  f.rgb = FLAKE_RGB[rand() % (sizeof FLAKE_RGB / sizeof FLAKE_RGB[0])];
+}
+}  // namespace
+
+void confettiReset() {
+  for (auto& f : flakes) f.drawn = false;
+}
+
+void confettiClear(lgfx::LovyanGFX& g) {
+  for (int i = FLAKES - 1; i >= 0; i--) {  // reverse order, so overlapping flakes restore cleanly
+    Flake& f = flakes[i];
+    if (f.drawn) g.pushImage(f.dx, f.dy, f.w, f.h, f.under);
+    f.drawn = false;
+  }
+}
+
+void confettiStep(lgfx::LovyanGFX& g, uint32_t ms) {
+  const int W = g.width(), H = g.height();
+  if (!flakesInit) {
+    srand(ms);
+    for (auto& f : flakes) spawn(f, W, frand(0, H - 4)), f.drawn = false;
+    flakesInit = true;
+    flakesAt = ms;
+  }
+  float dt = (ms - flakesAt) / 1000.0f;
+  if (dt < 0.04f) return;
+  if (dt > 0.5f) dt = 0.5f;
+  flakesAt = ms;
+  int nx[FLAKES], ny[FLAKES], nw[FLAKES], nh[FLAKES];
+  bool moved = false;
+  for (int i = 0; i < FLAKES; i++) {
+    Flake& f = flakes[i];
+    f.y += f.vy * dt;
+    if (f.y > H) spawn(f, W, -frand(2, 30));
+    const uint8_t* sz = FLAKE_SZ[(ms / 240 + (int)(f.phase * 10)) % 4];
+    nx[i] = (int)(f.x + f.sway * sinf(f.phase + ms / 800.0f));
+    ny[i] = (int)f.y;
+    nw[i] = sz[0];
+    nh[i] = sz[1];
+    const bool show = ny[i] >= 0 && ny[i] + nh[i] <= H && nx[i] >= 0 && nx[i] + nw[i] <= W;
+    if (!show) nw[i] = 0;
+    if (show != f.drawn || (show && (nx[i] != f.dx || ny[i] != f.dy || nw[i] != f.w || nh[i] != f.h))) moved = true;
+  }
+  if (!moved) return;
+  confettiClear(g);
+  const uint32_t acc = accent();
+  for (int i = 0; i < FLAKES; i++) {
+    Flake& f = flakes[i];
+    if (!nw[i]) continue;
+    f.dx = nx[i], f.dy = ny[i], f.w = nw[i], f.h = nh[i];
+    g.readRect(f.dx, f.dy, f.w, f.h, f.under);
+    g.fillRect(f.dx, f.dy, f.w, f.h, c(g, f.rgb ? f.rgb : acc));
+    f.drawn = true;
+  }
 }
 
 }  // namespace ui

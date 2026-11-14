@@ -34,6 +34,10 @@ int main() {
   d.last.moving_s = 50 * 60 + 22; d.last.start_local = 1794470400 + 7 * 3600;  // Tue Nov 10 2026
   d.wx_valid = true; d.wx_temp = 53; d.wx_rain = 0; d.wx_desc = "CLEAR";
   ui::main(s, d); save(s, "out/main.ppm");
+  for (uint32_t ms = 1000; ms <= 3000; ms += 50) ui::confettiStep(s, ms);
+  save(s, "out/main_confetti.ppm");
+  ui::confettiClear(s); save(s, "out/main_confetti_cleared.ppm");
+  ui::confettiReset();
   UiData dr = d; dr.wx_temp = 61; dr.wx_rain = 70; ui::main(s, dr); save(s, "out/main_rain.ppm");
 
   UiData d2 = d; strcpy(d2.athlete, "Jessica Martinez-Thompson"); d2.ytd_m = 1288.4f * 1609.344f; d2.ytd_runs = 241;

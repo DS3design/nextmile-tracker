@@ -41,6 +41,10 @@ void setTheme(int i);
 uint32_t accent();  // current theme's accent colour, 0xRRGGBB
 void init();
 void main(lgfx::LovyanGFX& g, const UiData& d);
+// A few confetti flakes drifting down over the main screen; each flake saves and restores what's under it.
+void confettiStep(lgfx::LovyanGFX& g, uint32_t ms);
+void confettiClear(lgfx::LovyanGFX& g);  // put back what the flakes covered
+void confettiReset();                    // the screen was redrawn: forget the flakes
 // WiFi setup on the touchscreen: a list of nearby WiFi, then an on-screen keyboard for the password.
 struct WifiNet { char ssid[33]; int rssi; bool open; };
 constexpr int NET_ROWS = 3;

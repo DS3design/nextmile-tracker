@@ -18,9 +18,11 @@ void wake();            // touch while dark: light the screen for a while
 int lightRaw();         // smoothed sensor reading, for calibration on the settings page
 
 // LED events
-void newRun();
+const uint32_t NEWRUN_MS = 6UL * 60 * 60 * 1000;  // how long new miles are celebrated
+void newRun(uint32_t ageMs = 0);  // ageMs: how long ago the miles came in (resuming after a restart)
 void milestone();
-void dismiss();         // touch clears the new-run glow
+bool celebrating();     // within NEWRUN_MS of new miles
+void dismiss();         // touch stops the milestone flashing
 void setAhead(bool ahead);
 void setSetup(bool on);  // rainbow while the tracker is being set up
 

@@ -401,8 +401,22 @@ void checkEvents(int prevRuns, float prevMi) {
   UiData d = app::uiData();
   bool big = floorf(mi / 100) > floorf(prevMi / 100) || (d.goal_mi > 0 && prevMi < d.goal_mi && mi >= d.goal_mi) ||
              (d.last_year_mi > 0 && prevMi <= d.last_year_mi && mi > d.last_year_mi);
+  Serial.printf("new miles: %d -> %d activities%s\n", prevRuns, (int)t.runs, big ? " (milestone)" : "");
   if (big) extras::milestone();
   else extras::newRun();
+  prefs.putUInt("partyAt", (uint32_t)time(nullptr));  // so a restart doesn't cut the celebration short
+}
+
+// Light confetti over the main screen while new miles are being celebrated.
+void confetti() {
+  static bool on = false;
+  const bool want = shown == Screen::Main && extras::celebrating() && blNow > 0;
+  if (!want && !on) return;
+  lcd.startWrite();
+  if (want) ui::confettiStep(lcd, millis());
+  else ui::confettiClear(lcd);
+  lcd.endWrite();
+  on = want;
 }
 
 void updatePace() {
@@ -412,6 +426,12 @@ void updatePace() {
   if (!timeValid()) return;
   UiData d = app::uiData();
   time_t now = time(nullptr);
+  static bool resumed = false;
+  if (!resumed) {
+    resumed = true;
+    const uint32_t at = prefs.getUInt("partyAt", 0), age = (uint32_t)now - at;
+    if (at && age < extras::NEWRUN_MS / 1000) extras::newRun(age * 1000);
+  }
   struct tm tmv;
   localtime_r(&now, &tmv);
   int y = tmv.tm_year + 1900;
@@ -436,7 +456,7 @@ void maybeSync() {
   const acts::Totals& t = acts::totals();
   const int prevYear = t.year, prevRuns = t.runs;
   const float prevMi = t.meters / 1609.344f;
-  const bool hadData = syncedOnce;
+  const bool hadData = syncedOnce || prevYear == y;  // this year's cache survives a power-off, so new miles found at power-up count
   if (bootSync) {  // a full re-read of the year at every power-up is slow, so skip it if one ran today
     bootSync = false;
     uint32_t at = prefs.getUInt("fullAt", 0);
@@ -519,6 +539,7 @@ Screen baseScreen() {
 void draw(Screen s) {
   String ip = app::ip();
   lcd.startWrite();
+  ui::confettiReset();
   switch (s) {
     case Screen::Main: ui::main(lcd, app::uiData()); break;
     case Screen::Info: ui::info(lcd, ("http://" + ip + "/").c_str(), ip.c_str(), WiFi.SSID().c_str(), app::cfg.led == 2); break;
@@ -753,6 +774,9 @@ void setup() {
   lcd.setRotation(1);
   lcd.setBrightness(0);
   lcd.fillScreen(TFT_BLACK);
+  lcd.fillRect(0, 0, 2, 1, TFT_RED);  // confetti needs to read the screen back
+  Serial.printf("readback %04x (want f800)\n", (unsigned)lcd.readPixel(1, 0));
+  lcd.fillRect(0, 0, 2, 1, TFT_BLACK);
   ui::init();
 
   ota::begin();
@@ -836,6 +860,7 @@ void loop() {
     dirty = true;
   }
 
+  if (Serial.available() && Serial.read() == 'C') extras::newRun();  // over USB: try out the new-miles celebration
   static uint32_t dbgAt = 0;
   if (millis() - dbgAt > 2000) {
     dbgAt = millis();
@@ -845,6 +870,7 @@ void loop() {
   if (holdShown < 0) {
     Screen want = baseScreen();
     if (want != shown || (dirty && want != Screen::WifiList && want != Screen::WifiPass && want != Screen::WifiPhone)) draw(want);
+    confetti();
   }
   delay(10);
 }

@@ -16,7 +16,7 @@ const int CH_R = 4, CH_G = 5, CH_B = 6;  // backlight uses LEDC channel 7
 const int DIM_ON = 250, DIM_OFF = 150, DARK_ON = 900, DARK_OFF = 600;
 const uint32_t DARK_OFF_AFTER_MS = 2UL * 60 * 1000, WAKE_MS = 30UL * 1000;
 const uint32_t WX_EVERY_MS = 30UL * 60 * 1000, WX_RETRY_MS = 10UL * 60 * 1000;
-const uint32_t NEWRUN_MS = 6UL * 60 * 60 * 1000, MILESTONE_MS = 60UL * 1000;
+const uint32_t MILESTONE_MS = 60UL * 1000;
 
 float lightAvg = 0;
 bool lightInit = false, dim = false, dark = false;
@@ -71,7 +71,7 @@ void ledLoop() {
   lastLed = now;
   const uint8_t mode = app::cfg.led;  // 0 off, 1 glow after new miles, 2 always on
   if (milestoneOn && now - milestoneAt > MILESTONE_MS) milestoneOn = false;
-  if (newRunOn && now - newRunAt > NEWRUN_MS) newRunOn = false;
+  if (newRunOn && now - newRunAt > extras::NEWRUN_MS) newRunOn = false;
   const uint32_t col = ui::accent();
   if (col != lastAccent) {
     if (lastAccent) previewUntil = now + 5000;  // show the new theme's colour
@@ -216,10 +216,12 @@ uint8_t backlight() {
 void wake() { wakeUntil = millis() + WAKE_MS; }
 int lightRaw() { return (int)lightAvg; }
 
-void newRun() {
+void newRun(uint32_t ageMs) {
   newRunOn = true;
-  newRunAt = millis();
+  newRunAt = millis() - ageMs;
 }
+
+bool celebrating() { return newRunOn && millis() - newRunAt < NEWRUN_MS; }
 
 void milestone() {
   milestoneOn = true;
@@ -227,7 +229,7 @@ void milestone() {
   newRun();
 }
 
-void dismiss() { newRunOn = milestoneOn = false; }
+void dismiss() { milestoneOn = false; }
 void setAhead(bool a) { ahead = a; }
 void setSetup(bool on) { setupMode = on; }
 
