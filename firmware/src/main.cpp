@@ -804,6 +804,7 @@ void loop() {
   // Routers often refuse the first join right after a restart, and the ESP32 doesn't retry that on its own.
   if (!portalActive && wifiSaved && !joining) {
     const wl_status_t st = WiFi.status();
+    if (st == WL_CONNECTED) wifiTryAt = millis();  // after a drop, give the ESP32's own reconnect 20 s first
     const uint32_t since = millis() - wifiTryAt;
     if (st != WL_CONNECTED && (st == WL_CONNECT_FAILED || st == WL_NO_SSID_AVAIL ? since > 4000 : since > 20000)) {
       Serial.printf("wifi retry (status %d)\n", (int)st);
