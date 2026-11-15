@@ -323,9 +323,9 @@ void handleName() {
 void handleIntervals() {
   const int r = pick();
   if (server.method() == HTTP_POST) {
-    src::Result r = src::linkIntervals(server.arg("key"));
-    if (r == src::OK) return linkedPage();
-    return sendPage("Key not accepted", "<p>" + String(src::describe(r)) +
+    src::Result res = src::linkIntervals(server.arg("key"));
+    if (res == src::OK) return linkedPage();
+    return sendPage("Key not accepted", "<p>" + String(src::describe(res)) +
                                             ". Make sure you copied the whole key.</p><a class=btn href='/intervals" + rq(r) + "'>Try again</a>");
   }
   sendPage("Link intervals.icu",
@@ -343,9 +343,9 @@ void handleIntervals() {
 void handleGarmin() {
   const int r = pick();
   if (server.method() == HTTP_POST) {
-    src::Result r = src::linkGarmin(server.arg("key"));
-    if (r == src::OK) return linkedPage();
-    return sendPage("Key not accepted", "<p>" + String(src::describe(r)) +
+    src::Result res = src::linkGarmin(server.arg("key"));
+    if (res == src::OK) return linkedPage();
+    return sendPage("Key not accepted", "<p>" + String(src::describe(res)) +
                                             ". Make sure you copied the whole key.</p><a class=btn href='/garmin" + rq(r) + "'>Try again</a>");
   }
   sendPage("Link Garmin",
