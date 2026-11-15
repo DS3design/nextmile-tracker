@@ -213,7 +213,15 @@ void goalLine(lgfx::LovyanGFX& g, const UiData& d, int x, int y, int w, int bh) 
   if (fw > 0) g.fillRoundRect(x, by, fw < bh ? bh : fw, bh, bh / 2, c(g, RED));
   char gm[20], left[64], right[16];
   formatMiles(gm, sizeof gm, d.goal_mi, d.goal_auto ? 1 : 0);
-  if (pct >= 1 && d.goal_auto) {
+  const bool narrow = w < 500;
+  if (narrow) {
+    char over[20];
+    formatMiles(over, sizeof over, miles - d.goal_mi, 1);
+    if (pct >= 1 && d.goal_auto) snprintf(left, sizeof left, "BEAT %d BY %s!", d.last_year, over);
+    else if (pct >= 1) snprintf(left, sizeof left, "GOAL %s  -  DONE!", gm);
+    else if (d.goal_auto) snprintf(left, sizeof left, "BEAT %d: %s MI", d.last_year, gm);
+    else snprintf(left, sizeof left, "GOAL %s MI", gm);
+  } else if (pct >= 1 && d.goal_auto) {
     char over[20];
     formatMiles(over, sizeof over, miles - d.goal_mi, 1);
     snprintf(left, sizeof left, "YOU BEAT %d BY %s MI!", d.last_year, over);
@@ -299,13 +307,13 @@ void runner(lgfx::LovyanGFX& g, const UiData& d, int x0, int w, const char* fall
   const float miles = d.ytd_m / 1609.344f;
   char big[24];
   formatMiles(big, sizeof big, miles, 1);
-  text(g, half ? &f_half : &f_big, WHITE, BLACK, top_center, big, x0 + w / 2, half ? 96 : 84);
+  text(g, half ? &f_half : &f_big, WHITE, BLACK, top_center, big, x0 + w / 2, half ? 56 : 34);
   // header after the number: the big glyph boxes reach up into the header band
   header(g, d.athlete[0] ? d.athlete : fallback, d.wifi_ok, right, x0, w, icon);
   char lbl[64];
   snprintf(lbl, sizeof lbl, "MILES IN %d  -  %u %s", d.year, d.ytd_runs, noun(d.kinds, d.ytd_runs != 1));
-  text(g, &f_label, GREY, BLACK, top_center, lbl, x0 + w / 2, half ? 236 : 268);
-  goalLine(g, d, x0 + M, half ? 278 : 304, w - 2 * M, half ? 22 : 28);
+  text(g, &f_label, GREY, BLACK, top_center, lbl, x0 + w / 2, half ? 214 : 252);
+  goalLine(g, d, x0 + M, half ? 262 : 296, w - 2 * M, half ? 22 : 28);
   if (half) lastPanel(g, d, x0 + M, 352, w - 2 * M, 120);
   else lastPanel(g, d, x0 + M, 384, w - 2 * M, 88);
 }
@@ -334,14 +342,14 @@ void together(lgfx::LovyanGFX& g, const UiData& a, const UiData& b) {
   const float ma = a.ytd_m / 1609.344f, mb = b.ytd_m / 1609.344f, sum = ma + mb;
   char big[24];
   formatMiles(big, sizeof big, sum, 1);
-  text(g, &f_big, WHITE, BLACK, top_center, big, W / 2, 84);
+  text(g, &f_big, WHITE, BLACK, top_center, big, W / 2, 34);
   char wx[40];
   weatherText(wx, sizeof wx, a);
   header(g, "Together", a.wifi_ok && b.wifi_ok, wx);
   char lbl[64];
   snprintf(lbl, sizeof lbl, "MILES TOGETHER IN %d  -  %u %s", a.year, a.ytd_runs + b.ytd_runs,
            a.kinds == b.kinds ? noun(a.kinds, true) : "ACTIVITIES");
-  text(g, &f_label, GREY, BLACK, top_center, lbl, W / 2, 268);
+  text(g, &f_label, GREY, BLACK, top_center, lbl, W / 2, 252);
   // One bar split into each person's share, against both goals added up.
   const float goal = a.goal_mi + b.goal_mi;
   const int bx = M, by = 344, bw = W - 2 * M, bh = 28;

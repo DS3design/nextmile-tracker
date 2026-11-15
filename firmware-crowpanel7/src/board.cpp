@@ -92,7 +92,7 @@ class LGFX_V3 : public lgfx::LGFX_Device {
     c.pin_vsync = 40;
     c.pin_hsync = 39;
     c.pin_pclk = 0;
-    c.freq_write = 15000000;
+    c.freq_write = 12000000;  // V3.0 runs the panel at 12 MHz
     rgbBus(c);
     c.hsync_front_porch = 40;
     c.hsync_pulse_width = 48;
