@@ -619,14 +619,14 @@ void draw(Screen s) {
 void onTap() {
   switch (shown) {
     case Screen::Main:
-      if (duoShown()) {  // two runners: tap to the combined miles, then to settings
+      if (!netUp && millis() - bootMs > 60000) {
+        wantPortal = true;  // no WiFi for a while: let them pick a new network
+      } else if (duoShown()) {  // two runners: tap to the combined miles, then to settings
         together = true;
         infoSince = millis();
       } else if (netUp) {
         overlayInfo = true;
         infoSince = millis();
-      } else if (millis() - bootMs > 60000) {
-        wantPortal = true;  // no WiFi for a while: let them pick a new network
       }
       break;
     case Screen::Together:
