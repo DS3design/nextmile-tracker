@@ -64,6 +64,17 @@ void redirect(const String& to) {
   server.send(302, "text/plain", "");
 }
 
+// Two-runner mode: every page is for runner 0 or 1, picked by ?r=1. Pages keep it in their links and forms.
+int linkRunner = 0;  // who is part-way through linking a brand that comes back through /exchange
+
+int pick() {
+  const int r = app::cfg.duo && server.arg("r") == "1" ? 1 : 0;
+  src::use(r);
+  return r;
+}
+String rq(int r, char sep = '?') { return r ? String(sep) + "r=1" : String(); }
+String rIn(int r) { return r ? String(F("<input type=hidden name=r value=1>")) : String(); }
+
 String miles(float m) {
   char b[24];
   ui::formatMiles(b, sizeof b, m / 1609.344f, 1);
@@ -71,18 +82,28 @@ String miles(float m) {
 }
 
 void handleRoot() {
-  if (!src::linked()) return redirect("/link");
+  const int r = pick();
+  if (!src::linked()) return redirect("/link" + rq(r));
   const acts::Totals& t = acts::totals();
   UiData d = app::uiData();
   String b;
+  if (app::cfg.duo) {  // a tab for each runner
+    b += F("<div class=row>");
+    for (int i = 0; i < 2; i++) {
+      UiData o = app::uiData(i);
+      String n = o.athlete[0] ? esc(String(o.athlete)) : String(i ? "Runner 2" : "Runner 1");
+      b += "<a class='btn" + String(i == r ? "" : " ghost") + "' href='/" + rq(i) + "'>" + n + "</a>";
+    }
+    b += F("</div>");
+  }
   b += F("<div class=card><div class=dim>");
   b += esc(String(d.athlete));
   b += F("</div><div class=big>");
   b += miles(t.meters);
   b += F(" mi</div><div class=dim>");
   b += String(d.year) + " &middot; " + t.runs + " " +
-       (app::cfg.kinds == 2 ? (t.runs == 1 ? "walk" : "walks")
-        : app::cfg.kinds == 3 ? (t.runs == 1 ? "activity" : "activities")
+       (app::kindsOf(r) == 2 ? (t.runs == 1 ? "walk" : "walks")
+        : app::kindsOf(r) == 3 ? (t.runs == 1 ? "activity" : "activities")
                               : (t.runs == 1 ? "run" : "runs"));
   uint32_t ago = app::lastSyncAgoS();
   b += ago == UINT32_MAX ? String(" &middot; not synced yet") : " &middot; synced " + String(ago / 60) + " min ago";
@@ -94,16 +115,17 @@ void handleRoot() {
          " &middot; " + w.rain + "% rain &middot; wind " + w.wind + " mph</div>";
   }
   b += F("</div></div><form method=post action=/save>");
+  b += rIn(r);
 
   b += F("<h2>Yearly goal</h2><label class=row><input type=radio name=gm value=auto");
-  if (app::cfg.goalMi <= 0) b += F(" checked");
+  if (app::goalOf(r) <= 0) b += F(" checked");
   b += F("> Beat last year");
   if (t.lastYear == d.year - 1 && t.lastYearMeters > 0)
     b += " (" + miles(t.lastYearMeters) + " mi in " + t.lastYear + ")";
   b += F("</label><label class=row><input type=radio name=gm value=own");
-  if (app::cfg.goalMi > 0) b += F(" checked");
+  if (app::goalOf(r) > 0) b += F(" checked");
   b += F("> My own goal</label><input type=number name=goal min=1 max=10000 step=1 inputmode=numeric placeholder='Miles this year' value='");
-  if (app::cfg.goalMi > 0) b += String((int)app::cfg.goalMi);
+  if (app::goalOf(r) > 0) b += String((int)app::goalOf(r));
   b += F("' onfocus=\"document.querySelector('[value=own]').checked=true\">");
 
   if (src::kind() == src::POLAR) {
@@ -115,14 +137,18 @@ void handleRoot() {
   b += F("<h2>Screen</h2><label>Name on screen</label><input type=text name=name maxlength=30 placeholder='");
   b += esc(src::athleteName());
   b += F("' value='");
-  b += esc(app::cfg.name);
+  b += esc(app::nameOf(r));
   b += F("'><label>Brightness</label><input type=range name=bright min=20 max=255 value=");
   b += String(app::cfg.bright);
   b += F("><label>Count my</label>");
   static const char* const KINDS[] = {"Runs", "Walks and hikes", "Runs, walks and hikes"};
   for (int i = 1; i <= 3; i++)
-    b += "<label class=row><input type=radio name=kinds value=" + String(i) + (app::cfg.kinds == i ? " checked> " : "> ") +
+    b += "<label class=row><input type=radio name=kinds value=" + String(i) + (app::kindsOf(r) == i ? " checked> " : "> ") +
          KINDS[i - 1] + "</label>";
+  b += F("<label class=row><input type=checkbox name=duo value=1");
+  if (app::cfg.duo) b += F(" checked");
+  b += F("> Two runners, side by side</label><div class=dim>A second person links their own watch and gets their own "
+         "goal. Tap the tracker's screen to see your miles added up.</div>");
   b += F("<label>Colors</label><select name=theme>");
   for (int i = 0; i < ui::themeCount(); i++)
     b += "<option value=" + String(i) + (i == app::cfg.theme ? " selected>" : ">") + ui::themeName(i) + "</option>";
@@ -149,9 +175,16 @@ void handleRoot() {
   if (app::cfg.led == 2) b += F(" checked");
   b += F("> Keep the light on the back on all the time</label><div class=dim>Otherwise it glows for 6 hours after new miles and flashes on milestones. It uses your color theme.</div><button>Save</button></form>");
 
-  b += F("<h2>More</h2><form method=post action=/sync><button class=ghost>Refresh miles now</button></form>"
-         "<form method=post action=/update><button class=ghost>Check for software update</button></form>"
-         "<a class='btn ghost' href=/link>Link a different watch</a>"
+  b += F("<h2>More</h2><form method=post action=/sync><button class=ghost>Refresh miles now</button></form>");
+  if (app::cfg.duo) {
+    src::use(1);
+    if (!src::linked()) b += F("<a class=btn href='/link?r=1'>Link the second runner's watch</a>");
+    src::use(r);
+  }
+  b += F("<form method=post action=/update><button class=ghost>Check for software update</button></form>"
+         "<a class='btn ghost' href=/link");
+  b += rq(r);
+  b += F(">Link a different watch</a>"
          "<form method=post action=/wifi><button class=ghost>Change WiFi</button></form>"
          "<form method=post action=/reset onsubmit=\"return confirm('Erase WiFi, watch link and settings?')\">"
          "<button class=warn>Erase everything</button></form>"
@@ -165,15 +198,17 @@ void handleRoot() {
 }
 
 void handleSave() {
+  const int r = pick();
   Settings& c = app::cfg;
-  c.name = server.arg("name");
-  c.name.trim();
-  if (server.arg("gm") == "own" && server.arg("goal").toFloat() > 0) c.goalMi = server.arg("goal").toFloat();
-  else c.goalMi = 0;
+  String& name = app::nameOf(r);
+  name = server.arg("name");
+  name.trim();
+  if (server.arg("gm") == "own" && server.arg("goal").toFloat() > 0) app::goalOf(r) = server.arg("goal").toFloat();
+  else app::goalOf(r) = 0;
   int br = server.arg("bright").toInt();
   if (br >= 20 && br <= 255) c.bright = br;
   int kinds = server.arg("kinds").toInt();
-  if (kinds < 1 || kinds > 3) kinds = c.kinds;
+  if (kinds < 1 || kinds > 3) kinds = app::kindsOf(r);
   String tz = server.arg("tz");
   bool tzChanged = tz.length() && tz != c.tz;
   if (tzChanged) {
@@ -181,8 +216,8 @@ void handleSave() {
     c.tzManual = true;
     app::applyTz();
   }
-  bool resync = tzChanged || kinds != c.kinds;
-  c.kinds = kinds;
+  bool resync = tzChanged || kinds != app::kindsOf(r);
+  app::kindsOf(r) = kinds;
   int th = server.hasArg("theme") ? server.arg("theme").toInt() : -1;
   if (th >= 0 && th < ui::themeCount()) {
     c.theme = th;
@@ -197,18 +232,27 @@ void handleSave() {
   }
   c.autoDim = server.hasArg("adim");
   c.led = server.hasArg("ledon") ? 2 : 1;
+  const bool duoOn = server.hasArg("duo") && !c.duo;
+  c.duo = server.hasArg("duo");
   app::saveSettings();
   app::requestSync(resync);
-  redirect("/");
+  if (duoOn) {  // just switched on: straight to linking the second runner, unless they already have
+    src::use(1);
+    if (!src::linked()) return redirect("/link?r=1");
+    src::use(r);
+  }
+  redirect("/" + rq(c.duo ? r : 0));
 }
 
 // Step 1 of linking: pick a brand. The script tacks the phone's time zone onto each link for the new-year reset.
 void handleLink() {
-  String b = F("<p>Which watch or app records your runs?</p>");
+  const int r = pick();
+  String b = r ? F("<p><b>Second runner:</b> which watch or app records your runs?</p>")
+               : F("<p>Which watch or app records your runs?</p>");
   const src::Kind order[] = {src::GARMIN, src::APPLE, src::COROS, src::GOOGLE, src::POLAR, src::WHOOP, src::OURA, src::WITHINGS, src::WAHOO, src::INTERVALS, src::STRAVA};
   for (src::Kind k : order) {
     if (!src::available(k)) continue;
-    b += "<a class='btn ghost' href='/go?k=" + String((int)k) + "'>" + src::label(k) + "</a>";
+    b += "<a class='btn ghost' href='/go?k=" + String((int)k) + "" + rq(r, '&') + "'>" + src::label(k) + "</a>";
   }
   b += F("<p class=dim>Suunto, Zwift or something else? Connect it to a free intervals.icu account, then pick "
          "intervals.icu here. More brands arrive in free updates.</p><script>"
@@ -219,6 +263,8 @@ void handleLink() {
 }
 
 void handleGo() {
+  const int r = pick();
+  linkRunner = r;
   Settings& c = app::cfg;
   if (!c.tzManual && server.hasArg("tz")) {
     String iana = server.arg("tz");
@@ -239,37 +285,41 @@ void handleGo() {
     }
   }
   src::Kind k = (src::Kind)server.arg("k").toInt();
-  if (k == src::GARMIN) return redirect("/garmin");
-  if (k == src::INTERVALS) return redirect("/intervals");
+  if (k == src::GARMIN) return redirect("/garmin" + rq(r));
+  if (k == src::INTERVALS) return redirect("/intervals" + rq(r));
   if (k == src::APPLE) {
     if (src::kind() != src::APPLE || !src::linked()) src::linkApple();
     app::onLinked();
-    return redirect("/apple");
+    return redirect("/apple" + rq(r));
   }
   if (!src::available(k)) return sendPage("Not available yet", F("<p>That brand isn't switched on in this tracker yet.</p><a class=btn href=/link>Back</a>"));
   redirect(src::authorizeUrl(k, app::ip()));
 }
 
 void linkedPage() {
+  const int r = src::current();
   app::onLinked();
   String n = esc(src::athleteName());
   sendPage("You're all set", "<p>Linked to " + String(src::label(src::kind())) + (n.length() ? " as <b>" + n + "</b>" : String("")) +
                                  ". Your tracker is loading this year's miles now.</p>" +
                                  (n.length() ? String()
-                                             : String(F("<form method=post action=/name><label>Your name for the screen</label>"
+                                             : String(rIn(r) + F("<form method=post action=/name><label>Your name for the screen</label>"
                                                         "<input type=text name=name maxlength=30 autocomplete=given-name>"
                                                         "<button>Save name</button></form>"))) +
-                                 "<a class='btn ghost' href=/>Goal &amp; settings</a>");
+                                 "<a class='btn ghost' href='/" + rq(r) + "'>Goal &amp; settings</a>");
 }
 
 void handleName() {
-  app::cfg.name = server.arg("name");
-  app::cfg.name.trim();
+  const int r = pick();
+  String& name = app::nameOf(r);
+  name = server.arg("name");
+  name.trim();
   app::saveSettings();
-  redirect("/");
+  redirect("/" + rq(r));
 }
 
 void handleIntervals() {
+  const int r = pick();
   if (server.method() == HTTP_POST) {
     src::Result r = src::linkIntervals(server.arg("key"));
     if (r == src::OK) return linkedPage();
@@ -277,18 +327,19 @@ void handleIntervals() {
                                             ". Make sure you copied the whole key.</p><a class=btn href=/intervals>Try again</a>");
   }
   sendPage("Link intervals.icu",
-           F("<ol><li>Make a free account at intervals.icu and connect your watch under <b>Settings &rarr; Connections</b> "
+           String(F("<ol><li>Make a free account at intervals.icu and connect your watch under <b>Settings &rarr; Connections</b> "
              "(Garmin, COROS, Suunto, Polar, Wahoo and more).</li><li>On the same Settings page, scroll to <b>Developer "
              "Settings</b> and generate an <b>API key</b>, then copy it.</li><li>Come back here, paste it below and tap "
              "<b>Link</b>.</li></ol>"
              "<a class='btn ghost' target=_blank href='https://intervals.icu/settings'>Open intervals.icu</a>"
-             "<form method=post action=/intervals><label>API key</label><input type=text name=key autocomplete=off "
+             "<form method=post action=/intervals>")) + rIn(r) + F("<label>API key</label><input type=text name=key autocomplete=off "
              "autocapitalize=off spellcheck=false required><button>Link</button></form>"
              "<p class=dim>Connect your watch to intervals.icu directly. Runs it gets from Strava can't be passed on to "
              "other apps.</p>"));
 }
 
 void handleGarmin() {
+  const int r = pick();
   if (server.method() == HTTP_POST) {
     src::Result r = src::linkGarmin(server.arg("key"));
     if (r == src::OK) return linkedPage();
@@ -296,15 +347,16 @@ void handleGarmin() {
                                             ". Make sure you copied the whole key.</p><a class=btn href=/garmin>Try again</a>");
   }
   sendPage("Link Garmin",
-           F("<ol><li>Tap <b>Open Garmin Connect</b> and sign in.</li><li>Tap <b>Create Key</b>, choose <b>1 year</b>, "
+           String(F("<ol><li>Tap <b>Open Garmin Connect</b> and sign in.</li><li>Tap <b>Create Key</b>, choose <b>1 year</b>, "
              "then copy the key. Garmin only shows it once.</li><li>Come back here, paste it below and tap <b>Link</b>.</li></ol>"
              "<a class='btn ghost' target=_blank href='https://connect.garmin.com/app/settings/personalApiToken'>Open Garmin Connect</a>"
-             "<form method=post action=/garmin><label>Personal API key</label><input type=text name=key autocomplete=off "
+             "<form method=post action=/garmin>")) + rIn(r) + F("<label>Personal API key</label><input type=text name=key autocomplete=off "
              "autocapitalize=off spellcheck=false required><button>Link</button></form>"
              "<p class=dim>Garmin emails you before the key expires. Make a new one and paste it here the same way.</p>"));
 }
 
 void handleApple() {
+  const int r = pick();
   String url = "http://" + app::ip() + "/api/apple?t=" + src::appleToken();
   String b = F("<p>Apple Watch runs live in the Health app on your iPhone, so an iPhone Shortcut sends your miles to the "
                "tracker. Set it up once:</p><ol>"
@@ -317,12 +369,18 @@ void handleApple() {
                "<label>Tracker address for the Shortcut</label><input type=text readonly onclick='this.select()' value='");
   b += esc(url);
   b += F("'><p class=dim>Your iPhone must be home on the same WiFi when it runs. A ready-made Shortcut link is on the "
-         "Next Mile Tracker help page.</p><a class='btn ghost' href=/>Goal &amp; settings</a>");
+         "Next Mile Tracker help page.</p><a class='btn ghost' href='/");
+  b += rq(r);
+  b += F("'>Goal &amp; settings</a>");
   sendPage("Link Apple Watch", b);
 }
 
 void handleApplePush() {
-  src::Result r = src::applePush(server.arg("t"), server.arg("plain"));
+  src::Result r = src::AUTH;
+  for (int i = 0; i < app::runners() && r == src::AUTH; i++) {  // the token says whose iPhone it is
+    src::use(i);
+    if (src::kind() == src::APPLE) r = src::applePush(server.arg("t"), server.arg("plain"));
+  }
   if (r == src::OK) app::onPushed();
   server.send(r == src::OK ? 200 : (r == src::AUTH ? 403 : 400), "application/json",
               r == src::OK ? "{\"ok\":true}" : "{\"ok\":false}");
@@ -330,6 +388,7 @@ void handleApplePush() {
 
 // Step 2: the GitHub Pages link page forwards the one-time code here, with src=<brand number>.
 void handleExchange() {
+  src::use(app::cfg.duo ? linkRunner : 0);
   src::Kind k = server.hasArg("src") ? (src::Kind)server.arg("src").toInt() : src::STRAVA;
   if (server.hasArg("error") || !server.hasArg("code")) {
     return sendPage("Not linked", F("<p>Your watch account wasn't connected (Cancel was tapped).</p><a class=btn href=/link>Try again</a>"));
@@ -345,8 +404,9 @@ void handleExchange() {
 }
 
 void handleSync() {
+  const int r = pick();
   app::requestSync(true);
-  redirect("/");
+  redirect("/" + rq(r));
 }
 
 void handleUpdate() {

@@ -22,7 +22,7 @@
 
 namespace {
 
-enum class Screen { None, WifiList, WifiPass, WifiPhone, Joining, Connecting, Clock, WifiRetry, Link, Main, Info, NotConfigured };
+enum class Screen { None, WifiList, WifiPass, WifiPhone, Joining, Connecting, Clock, WifiRetry, Link, Main, Together, Info, NotConfigured };
 
 const uint32_t RECENT_EVERY_MS = 30UL * 60 * 1000;
 const uint32_t FULL_EVERY_MS = 24UL * 60 * 60 * 1000;
@@ -51,10 +51,42 @@ String pickSsid, pickPass, listErr, passErr;
 uint32_t joinAt = 0;
 bool portalActive = false, netUp = false, everConnected = false, wifiSaved = false;
 uint32_t wifiTryAt = 0;
-bool wantFull = true, wantRecent = false, wantPortal = false, wantReset = false, needRelink = false;
-uint32_t lastFull = 0, lastRecent = 0, lastSyncAt = 0, backoffUntil = 0, bootMs = 0;
-bool syncedOnce = false, syncing = false, loadingShown = false, bootSync = true;
-src::Result lastResult = src::OK;
+bool wantPortal = false, wantReset = false;
+uint32_t bootMs = 0;
+bool syncing = false, loadingShown = false;
+
+// Sync state for each runner (two-runner mode). The provider and run cache hold one runner at a time,
+// so each runner's totals are kept here for drawing.
+struct Runner {
+  bool wantFull = true, wantRecent = false, needRelink = false, syncedOnce = false, bootSync = true, reloadAll = false;
+  uint32_t lastFull = 0, lastRecent = 0, lastSyncAt = 0, backoffUntil = 0;
+  src::Result lastResult = src::OK;
+  bool linked = false;
+  src::Kind kind = src::NONE;
+  String athlete;
+  acts::Totals tot;
+};
+Runner run[2];
+bool together = false;  // two-runner mode: showing the combined miles
+
+const char* key(const char* k, int i) {  // per-runner prefs key: runner 2 gets a "1" on the end
+  static char b[16];
+  snprintf(b, sizeof b, "%s%s", k, i ? "1" : "");
+  return b;
+}
+
+// Copy what's loaded for the current runner, so both can be drawn without switching.
+void snap() {
+  Runner& r = run[src::current()];
+  r.tot = acts::totals();
+  r.linked = src::linked();
+  r.kind = src::kind();
+  r.athlete = src::athleteName();
+}
+
+// Two runners on screen: the mode is on and both have linked.
+bool duoShown() { return app::cfg.duo && run[0].linked && run[1].linked; }
+bool anyData() { return run[0].linked && !run[0].needRelink; }
 
 bool pressed = false;
 uint32_t pressStart = 0, lastTouch = 0;
@@ -178,6 +210,10 @@ void loadSettings() {
   c.placeName = prefs.getString("placeN", "");
   c.lat = prefs.getFloat("lat", 0);
   c.lon = prefs.getFloat("lon", 0);
+  c.duo = prefs.getBool("duo", false);
+  c.name2 = prefs.getString("name1", "");
+  c.goalMi2 = prefs.getFloat("goal1", 0);
+  c.kinds2 = prefs.getUChar("kinds1", 1);
   ui::setTheme(c.theme);
 }
 
@@ -377,7 +413,10 @@ void setupTap() {
 
 void factoryReset() {
   ui::message(lcd, "Erasing...", "Removing WiFi, watch link and settings.", nullptr);
-  src::unlink();
+  for (int i = 1; i >= 0; i--) {
+    src::use(i);
+    src::unlink();
+  }
   prefs.clear();
   wm.resetSettings();
   delay(500);
@@ -396,11 +435,11 @@ void onNetUp() {
 }
 
 // LED celebrations: a new run, every 100 miles, reaching the goal, passing last year's total.
-void checkEvents(int prevRuns, float prevMi) {
+void checkEvents(int i, int prevRuns, float prevMi) {
   const acts::Totals& t = acts::totals();
   if (t.runs <= prevRuns) return;
   const float mi = t.meters / 1609.344f;
-  UiData d = app::uiData();
+  UiData d = app::uiData(i);
   bool big = floorf(mi / 100) > floorf(prevMi / 100) || (d.goal_mi > 0 && prevMi < d.goal_mi && mi >= d.goal_mi) ||
              (d.last_year_mi > 0 && prevMi <= d.last_year_mi && mi > d.last_year_mi);
   Serial.printf("new miles: %d -> %d activities%s\n", prevRuns, (int)t.runs, big ? " (milestone)" : "");
@@ -412,7 +451,7 @@ void checkEvents(int prevRuns, float prevMi) {
 // Light confetti over the main screen while new miles are being celebrated.
 void confetti() {
   static bool on = false;
-  const bool want = shown == Screen::Main && extras::celebrating() && blNow > 0;
+  const bool want = (shown == Screen::Main || shown == Screen::Together) && extras::celebrating() && blNow > 0;
   if (!want && !on) return;
   lcd.startWrite();
   if (want) ui::confettiStep(lcd, millis());
@@ -426,7 +465,6 @@ void updatePace() {
   if (last && millis() - last < 60000) return;
   last = millis();
   if (!timeValid()) return;
-  UiData d = app::uiData();
   time_t now = time(nullptr);
   static bool resumed = false;
   if (!resumed) {
@@ -439,10 +477,14 @@ void updatePace() {
   int y = tmv.tm_year + 1900;
   int days = (y % 4 == 0 && (y % 100 != 0 || y % 400 == 0)) ? 366 : 365;
   float frac = (tmv.tm_yday + (tmv.tm_hour * 60 + tmv.tm_min) / 1440.0f) / days;
-  extras::setAhead(d.goal_mi > 0 && d.ytd_m / 1609.344f >= d.goal_mi * frac);
+  bool ahead = false;  // the light glows while anyone on screen is ahead of goal pace
+  for (int i = 0; i < app::runners(); i++) {
+    UiData d = app::uiData(i);
+    ahead = ahead || (run[i].linked && d.goal_mi > 0 && d.ytd_m / 1609.344f >= d.goal_mi * frac);
+  }
+  extras::setAhead(ahead);
 }
 
-bool reloadAll = false;  // settings changed what counts, so the year is re-read from scratch
 
 void drawLoading() {
   ui::message(lcd, "Loading your miles...", "Adding up this year so far.", "This can take a minute.");
@@ -450,55 +492,62 @@ void drawLoading() {
   loadingShown = true;
 }
 
-void maybeSync() {
-  if (!src::linked() || needRelink || !netUp || !timeValid()) return;
+void maybeSync(int i) {
+  Runner& R = run[i];
+  if (!R.linked || R.needRelink || !netUp || !timeValid()) return;
   uint32_t now = millis();
-  if ((int32_t)(backoffUntil - now) > 0) return;
+  if ((int32_t)(R.backoffUntil - now) > 0) return;
   const int y = localYear();
-  const acts::Totals& t = acts::totals();
+  const acts::Totals& t = R.tot;
   const int prevYear = t.year, prevRuns = t.runs;
   const float prevMi = t.meters / 1609.344f;
-  const bool hadData = syncedOnce || prevYear == y;  // this year's cache survives a power-off, so new miles found at power-up count
-  if (bootSync) {  // a full re-read of the year at every power-up is slow, so skip it if one ran today
-    bootSync = false;
-    uint32_t at = prefs.getUInt("fullAt", 0);
-    if (wantFull && t.year == y && at && (uint32_t)time(nullptr) - at < FULL_EVERY_MS / 1000) {
-      wantFull = false;
-      wantRecent = true;
-      lastFull = now;
+  const bool hadData = R.syncedOnce || prevYear == y;  // this year's cache survives a power-off, so new miles found at power-up count
+  if (R.bootSync) {  // a full re-read of the year at every power-up is slow, so skip it if one ran today
+    R.bootSync = false;
+    uint32_t at = prefs.getUInt(key("fullAt", i), 0);
+    if (R.wantFull && t.year == y && at && (uint32_t)time(nullptr) - at < FULL_EVERY_MS / 1000) {
+      R.wantFull = false;
+      R.wantRecent = true;
+      R.lastFull = now;
     }
   }
-  bool full = wantFull || t.year != y || now - lastFull > FULL_EVERY_MS;
-  bool recent = wantRecent || now - lastRecent > RECENT_EVERY_MS;
+  bool full = R.wantFull || t.year != y || now - R.lastFull > FULL_EVERY_MS;
+  bool recent = R.wantRecent || now - R.lastRecent > RECENT_EVERY_MS;
   bool lastYear = t.lastYear != y - 1;
   if (!full && !recent && !lastYear) return;
+  src::use(i);
 
-  const bool reread = reloadAll;  // also redo last year, which is otherwise read only once
+  const bool reread = R.reloadAll;  // also redo last year, which is otherwise read only once
   if ((t.year == 0 || reread) && shown != Screen::Info) drawLoading();
-  reloadAll = false;
+  R.reloadAll = false;
   src::Result r = src::OK;
   syncing = true;
-  if (full || recent) r = src::sync(y, full, app::cfg.kinds);
-  if (r == src::OK && (reread || acts::totals().lastYear != y - 1)) r = src::syncLastYear(y - 1, app::cfg.kinds);
+  if (full || recent) r = src::sync(y, full, app::kindsOf(i));
+  if (r == src::OK && (reread || acts::totals().lastYear != y - 1)) r = src::syncLastYear(y - 1, app::kindsOf(i));
   syncing = loadingShown = false;
 
-  lastResult = r;
+  R.lastResult = r;
   if (r == src::OK) {
     if (full) {
-      lastFull = now;
-      prefs.putUInt("fullAt", (uint32_t)time(nullptr));
+      R.lastFull = now;
+      prefs.putUInt(key("fullAt", i), (uint32_t)time(nullptr));
     }
-    lastRecent = now;
-    lastSyncAt = now;
-    syncedOnce = true;
-    wantFull = wantRecent = false;
-    if (hadData && prevYear == y) checkEvents(prevRuns, prevMi);
+    R.lastRecent = now;
+    R.lastSyncAt = now;
+    R.syncedOnce = true;
+    R.wantFull = R.wantRecent = false;
+    snap();
+    if (hadData && prevYear == y) checkEvents(i, prevRuns, prevMi);
   } else if (r == src::AUTH) {
-    needRelink = true;
+    R.needRelink = true;
   } else {
-    backoffUntil = now + (r == src::RATE ? 60UL : 5UL) * 60 * 1000;
+    R.backoffUntil = now + (r == src::RATE ? 60UL : 5UL) * 60 * 1000;
   }
   dirty = true;
+}
+
+void maybeSync() {
+  for (int i = 0; i < app::runners(); i++) maybeSync(i);
 }
 
 uint32_t otaLast = 0;
@@ -530,9 +579,9 @@ Screen baseScreen() {
   if (joining) return Screen::Joining;
   if (portalActive)
     return setupView == SetupView::Pass ? Screen::WifiPass : setupView == SetupView::Phone ? Screen::WifiPhone : Screen::WifiList;
-  bool showData = src::linked() && !needRelink;
+  bool showData = anyData();
   if (showData && overlayInfo && netUp) return Screen::Info;
-  if (showData) return Screen::Main;
+  if (showData) return together && duoShown() ? Screen::Together : Screen::Main;
   if (!netUp) return (everConnected || millis() - bootMs > 30000) ? Screen::WifiRetry : Screen::Connecting;
   if (!timeValid()) return Screen::Clock;
   return Screen::Link;
@@ -543,9 +592,13 @@ void draw(Screen s) {
   lcd.startWrite();
   ui::confettiReset();
   switch (s) {
-    case Screen::Main: ui::main(lcd, app::uiData()); break;
+    case Screen::Main:
+      if (duoShown()) ui::duo(lcd, app::uiData(0), app::uiData(1));
+      else ui::main(lcd, app::uiData(0));
+      break;
+    case Screen::Together: ui::together(lcd, app::uiData(0), app::uiData(1)); break;
     case Screen::Info: ui::info(lcd, ("http://" + ip + "/").c_str(), ip.c_str(), WiFi.SSID().c_str(), app::cfg.led == 2); break;
-    case Screen::Link: ui::linkStrava(lcd, ("http://" + ip + "/link").c_str(), ip.c_str(), needRelink); break;
+    case Screen::Link: ui::linkStrava(lcd, ("http://" + ip + "/link").c_str(), ip.c_str(), run[0].needRelink); break;
     case Screen::WifiRetry: ui::wifiRetry(lcd, WiFi.SSID().c_str()); break;
     case Screen::Connecting: ui::message(lcd, "Connecting...", "Joining your WiFi.", nullptr); break;
     case Screen::Clock: ui::message(lcd, "Connected!", "Setting the clock...", nullptr); break;
@@ -566,11 +619,21 @@ void draw(Screen s) {
 void onTap() {
   switch (shown) {
     case Screen::Main:
-      if (netUp) {
+      if (duoShown()) {  // two runners: tap to the combined miles, then to settings
+        together = true;
+        infoSince = millis();
+      } else if (netUp) {
         overlayInfo = true;
         infoSince = millis();
       } else if (millis() - bootMs > 60000) {
         wantPortal = true;  // no WiFi for a while: let them pick a new network
+      }
+      break;
+    case Screen::Together:
+      together = false;
+      if (netUp) {
+        overlayInfo = true;
+        infoSince = millis();
       }
       break;
     case Screen::Info:
@@ -680,6 +743,10 @@ void saveSettings() {
   prefs.putString("placeN", cfg.placeName);
   prefs.putFloat("lat", cfg.lat);
   prefs.putFloat("lon", cfg.lon);
+  prefs.putBool("duo", cfg.duo);
+  prefs.putString("name1", cfg.name2);
+  prefs.putFloat("goal1", cfg.goalMi2);
+  prefs.putUChar("kinds1", cfg.kinds2);
   applyBacklight();
   dirty = true;
 }
@@ -687,14 +754,13 @@ void saveSettings() {
 void applyTz() {
   setenv("TZ", cfg.tz.c_str(), 1);
   tzset();
-  wantFull = true;
-  bootSync = false;
+  for (Runner& r : run) r.wantFull = true, r.bootSync = false;
 }
 
 void requestSync(bool full) {
-  if (full) wantFull = reloadAll = true, bootSync = false;
-  else wantRecent = true;
-  backoffUntil = 0;
+  Runner& r = run[src::current()];
+  if (full) r.wantFull = r.reloadAll = true, r.bootSync = false;
+  for (Runner& x : run) x.wantRecent = true, x.backoffUntil = 0;
   dirty = true;
 }
 
@@ -703,27 +769,31 @@ void requestPortal() { wantPortal = true; }
 void requestReset() { wantReset = true; }
 
 void onLinked() {
-  bootSync = false;
-  needRelink = false;
-  wantFull = true;
-  backoffUntil = 0;
+  Runner& r = run[src::current()];
+  r.bootSync = r.needRelink = false;
+  r.wantFull = true;
+  r.backoffUntil = 0;
+  r.syncedOnce = false;
+  snap();
   overlayInfo = false;
   dirty = true;
 }
 
 void onPushed() {
-  lastSyncAt = millis();
-  syncedOnce = true;
-  lastResult = src::OK;
-  needRelink = false;
+  Runner& r = run[src::current()];
+  r.lastSyncAt = millis();
+  r.syncedOnce = true;
+  r.lastResult = src::OK;
+  r.needRelink = false;
+  snap();
   dirty = true;
 }
 
-float carryInMi() { return prefs.getFloat("carryMi", 0); }
+float carryInMi() { return prefs.getFloat(key("carryMi", src::current()), 0); }
 
 void setCarryInMi(float mi) {
   if (mi < 0 || mi > 20000) return;
-  prefs.putFloat("carryMi", mi);
+  prefs.putFloat(key("carryMi", src::current()), mi);
   if (timeValid()) acts::setCarryIn(localYear(), mi * 1609.344f);
   dirty = true;
 }
@@ -733,23 +803,34 @@ String ip() { return WiFi.localIP().toString(); }
 void requestUpdate() { wantOta = true; }
 String updateStatus() { return otaStatus; }
 
-uint32_t lastSyncAgoS() { return syncedOnce ? (millis() - lastSyncAt) / 1000 : UINT32_MAX; }
+uint32_t lastSyncAgoS() {
+  const Runner& r = run[src::current()];
+  return r.syncedOnce ? (millis() - r.lastSyncAt) / 1000 : UINT32_MAX;
+}
 
-UiData uiData() {
-  const acts::Totals& t = acts::totals();
+int runners() { return cfg.duo ? 2 : 1; }
+String& nameOf(int i) { return i ? cfg.name2 : cfg.name; }
+float& goalOf(int i) { return i ? cfg.goalMi2 : cfg.goalMi; }
+uint8_t& kindsOf(int i) { return i ? cfg.kinds2 : cfg.kinds; }
+
+UiData uiData() { return uiData(src::current()); }
+
+UiData uiData(int i) {
+  const Runner& R = run[i];
+  const acts::Totals& t = R.tot;
   UiData d;
-  String n = cfg.name.length() ? cfg.name : src::athleteName();
+  String n = nameOf(i).length() ? nameOf(i) : R.athlete;
   strlcpy(d.athlete, n.c_str(), sizeof d.athlete);
   d.year = timeValid() ? localYear() : (t.year ? t.year : 2026);
   bool current = t.year == d.year;
   d.ytd_m = current ? t.meters : 0;
   d.ytd_runs = current ? t.runs : 0;
   if (current) d.last = t.last;
-  d.kinds = cfg.kinds;
+  d.kinds = kindsOf(i);
   d.last_year = d.year - 1;
   d.last_year_mi = t.lastYear == d.year - 1 ? t.lastYearMeters / 1609.344f : 0;
-  if (cfg.goalMi > 0) {
-    d.goal_mi = cfg.goalMi;
+  if (goalOf(i) > 0) {
+    d.goal_mi = goalOf(i);
     d.goal_auto = false;
   } else {
     // "Beat last year": the goal is exactly last year's miles.
@@ -762,8 +843,8 @@ UiData uiData() {
   d.wx_rain = w.rain;
   d.wx_desc = extras::describe(w.code);
   d.wifi_ok = netUp;
-  d.sync_error = lastResult != src::OK;
-  d.source = src::kind() == src::GOOGLE ? "FITBIT" : src::kind() == src::APPLE ? "APPLE" : src::kind() == src::POLAR ? "POLAR" : src::kind() == src::GARMIN ? "GARMIN" : "STRAVA";
+  d.sync_error = R.lastResult != src::OK || R.needRelink;
+  d.source = R.kind == src::GOOGLE ? "FITBIT" : R.kind == src::APPLE ? "APPLE" : R.kind == src::POLAR ? "POLAR" : R.kind == src::GARMIN ? "GARMIN" : "STRAVA";
   return d;
 }
 
@@ -792,6 +873,10 @@ void setup() {
   tzset();
   if (!LittleFS.begin(false)) Serial.println("LittleFS mount failed; skipping intro");
   src::begin();
+  snap();
+  src::use(1);
+  snap();
+  src::use(0);
 
   WiFi.mode(WIFI_STA);
   WiFi.setHostname("nextmile");
@@ -852,15 +937,20 @@ void loop() {
   }
 
   web::loop();
+  static uint32_t snapAt = 0;
+  if (millis() - snapAt > 500) {  // the settings page may have just linked or changed the current runner
+    snapAt = millis();
+    snap();
+  }
   maybeSync();
-  extras::setSetup(shown != Screen::Main && shown != Screen::Info && shown != Screen::None);
+  extras::setSetup(shown != Screen::Main && shown != Screen::Together && shown != Screen::Info && shown != Screen::None);
   extras::loop(netUp && !portalActive);
   updatePace();
   applyBacklight();
   maybeOta();
 
-  if (overlayInfo && millis() - infoSince > INFO_TIMEOUT_MS) {
-    overlayInfo = false;
+  if ((overlayInfo || together) && millis() - infoSince > INFO_TIMEOUT_MS) {
+    overlayInfo = together = false;
     dirty = true;
   }
 

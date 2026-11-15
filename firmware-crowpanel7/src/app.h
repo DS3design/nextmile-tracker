@@ -19,6 +19,10 @@ struct Settings {
   String place;           // weather location as typed (ZIP or city)
   String placeName;       // resolved name, e.g. "Orangevale, California"
   float lat = 0, lon = 0;
+  bool duo = false;       // two-runner mode: a second person with their own link, name, goal and what counts
+  String name2;
+  float goalMi2 = 0;
+  uint8_t kinds2 = 1;
 };
 
 namespace app {
@@ -35,7 +39,12 @@ void requestUpdate();
 String updateStatus();
 float carryInMi();
 void setCarryInMi(float mi);
-UiData uiData();
+UiData uiData();  // the runner the settings page is on
+UiData uiData(int runner);
+int runners();  // 1, or 2 in two-runner mode
+String& nameOf(int runner);
+float& goalOf(int runner);
+uint8_t& kindsOf(int runner);
 String ip();
 uint32_t lastSyncAgoS();  // UINT32_MAX = never
 }
