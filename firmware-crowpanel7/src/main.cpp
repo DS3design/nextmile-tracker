@@ -343,7 +343,7 @@ void setupTap() {
     return;
   }
   if (setupView == SetupView::Phone) {
-    if (touchY >= 186) setupView = SetupView::List;
+    if (touchY >= 372) setupView = SetupView::List;
     return;
   }
   const int k = ui::wifiKeyHit(touchX, touchY, kbLayer);
@@ -575,7 +575,7 @@ void onTap() {
       break;
     case Screen::Info:
       if (touchY >= ui::THEME_BTN_Y - 10 && touchY <= ui::THEME_BTN_Y + ui::THEME_BTN_H + 6) {
-        if (touchX < 160) {
+        if (touchX < 400) {
           app::cfg.theme = (app::cfg.theme + 1) % ui::themeCount();
           ui::setTheme(app::cfg.theme);
         } else {

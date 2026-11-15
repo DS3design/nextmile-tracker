@@ -7,6 +7,8 @@
 #include <string.h>
 #include <time.h>
 
+#include <algorithm>
+
 #include "fonts_gen.h"
 #include "icon_gen.h"
 
@@ -36,8 +38,8 @@ int cur = 0;
 #define TRACK (THEMES[cur].track)
 #define RED (THEMES[cur].accent)
 
-lgfx::PointerWrapper w_big, w_title, w_mid, w_label, w_body;
-lgfx::VLWfont f_big, f_title, f_mid, f_label, f_body;
+lgfx::PointerWrapper w_big, w_half, w_title, w_mid, w_label, w_body;
+lgfx::VLWfont f_big, f_half, f_title, f_mid, f_label, f_body;
 bool fontsReady = false;
 
 void load(lgfx::VLWfont& f, lgfx::PointerWrapper& w, const uint8_t* data, size_t len) {
@@ -89,35 +91,39 @@ void drawIcon(lgfx::LovyanGFX& g, int x0, int y0, uint32_t bg) {
       uint8_t a = icon_mtn_a8[y * ICON_W + x];
       if (a < 8) continue;
       int r = br + (fr - br) * a / 255, gg = bgc + (fg - bgc) * a / 255, b = bb + (fb - bb) * a / 255;
-      g.drawPixel(x0 + x, y0 + y, g.color888(r, gg, b));
+      g.fillRect(x0 + x * 2, y0 + y * 2, 2, 2, g.color888(r, gg, b));  // drawn at 2x
     }
   }
 }
 
-void header(lgfx::LovyanGFX& g, const char* title, bool wifiOk, const char* right = nullptr) {
+constexpr int W = 800, H = 480, M = 30;  // screen and side margin
+constexpr int IW = ICON_W * 2, IH = ICON_H * 2;
+
+// Title across the top of the area x0..x0+w, with the Next Mile icon and an accent line under it.
+void header(lgfx::LovyanGFX& g, const char* title, bool wifiOk, const char* right = nullptr, int x0 = 0, int w = W,
+            bool icon = true) {
   char t[48];
   upper(t, sizeof t, title);
-  int room = 320 - 24 - ICON_W - 12;
-  int rx = 320 - 18 - ICON_W;
+  const int iw = icon ? IW + 20 : 0;
+  int room = w - 2 * M - iw;
+  int rx = x0 + w - M - iw;
   g.setFont(&f_label);
   if (!wifiOk) {
-    int w = g.textWidth("NO WIFI");
-    room -= w + 8;
-    text(g, &f_label, RED, BLACK, top_right, "NO WIFI", rx, 10);
+    room -= g.textWidth("NO WIFI") + 20;
+    text(g, &f_label, RED, BLACK, top_right, "NO WIFI", rx, 22);
   } else if (right && *right) {
-    g.setFont(&f_label);
-    room -= g.textWidth(right) + 20;
-    text(g, &f_label, GREY, BLACK, top_right, right, rx - 8, 10);
+    room -= g.textWidth(right) + 30;
+    text(g, &f_label, GREY, BLACK, top_right, right, rx, 22);
   }
   fit(g, &f_title, t, room);
-  text(g, &f_title, WHITE, BLACK, top_left, t, 12, 4);
-  drawIcon(g, 320 - 12 - ICON_W, 6, BLACK);
-  g.fillRect(12, 40, 296, 2, c(g, RED));
+  text(g, &f_title, WHITE, BLACK, top_left, t, x0 + M, 8);
+  if (icon) drawIcon(g, x0 + w - M - IW, 14, BLACK);
+  g.fillRect(x0 + M, 76, w - 2 * M, 4, c(g, RED));
 }
 
 void qr(lgfx::LovyanGFX& g, const char* s, int x, int y, int size) {
-  g.fillRoundRect(x - 6, y - 6, size + 12, size + 12, 6, c(g, 0xFFFFFF));  // QR stays dark-on-light in every theme
-  g.qrcode(s, x, y, size, 1, false);
+  g.fillRoundRect(x - 12, y - 12, size + 24, size + 24, 12, c(g, 0xFFFFFF));  // QR stays dark-on-light in every theme
+  g.qrcode(s, x, y, size, 2, false);
 }
 
 void lines(lgfx::LovyanGFX& g, const lgfx::IFont* f, uint32_t fg, int x, int y, int lh,
@@ -160,6 +166,7 @@ uint32_t accent() { return THEMES[cur].accent; }
 void init() {
   if (fontsReady) return;
   load(f_big, w_big, font_big_vlw, sizeof font_big_vlw);
+  load(f_half, w_half, font_half_vlw, sizeof font_half_vlw);
   load(f_title, w_title, font_title_vlw, sizeof font_title_vlw);
   load(f_mid, w_mid, font_mid_vlw, sizeof font_mid_vlw);
   load(f_label, w_label, font_label_vlw, sizeof font_label_vlw);
@@ -189,109 +196,191 @@ const char* noun(uint8_t kinds, bool plural) {
   return plural ? "RUNS" : "RUN";
 }
 
-void main(lgfx::LovyanGFX& g, const UiData& d) {
-  g.fillScreen(c(g, BLACK));
+namespace {
+
+void goalLine(lgfx::LovyanGFX& g, const UiData& d, int x, int y, int w, int bh) {
+  const float miles = d.ytd_m / 1609.344f;
+  const int by = y + 40;
+  g.fillRoundRect(x, by, w, bh, bh / 2, c(g, TRACK));
+  if (d.goal_mi <= 0) {
+    char t[64] = "TAP, THEN SCAN THE CODE TO SET A YEARLY GOAL";
+    fit(g, &f_label, t, w);
+    text(g, &f_label, GREY, BLACK, top_left, t, x, y);
+    return;
+  }
+  float pct = miles / d.goal_mi;
+  int fw = (int)(w * (pct > 1 ? 1 : pct));
+  if (fw > 0) g.fillRoundRect(x, by, fw < bh ? bh : fw, bh, bh / 2, c(g, RED));
+  char gm[20], left[64], right[16];
+  formatMiles(gm, sizeof gm, d.goal_mi, d.goal_auto ? 1 : 0);
+  if (pct >= 1 && d.goal_auto) {
+    char over[20];
+    formatMiles(over, sizeof over, miles - d.goal_mi, 1);
+    snprintf(left, sizeof left, "YOU BEAT %d BY %s MI!", d.last_year, over);
+  } else if (pct >= 1) {
+    snprintf(left, sizeof left, "GOAL %s MI  -  REACHED!", gm);
+  } else if (d.goal_auto) {
+    snprintf(left, sizeof left, "GOAL %s MI  -  BEAT %d", gm, d.last_year);
+  } else {
+    snprintf(left, sizeof left, "GOAL %s MI", gm);
+  }
+  snprintf(right, sizeof right, "%d%%", (int)(pct * 100 + 0.5f));
+  g.setFont(&f_label);
+  fit(g, &f_label, left, w - g.textWidth(right) - 24);
+  text(g, &f_label, WHITE, BLACK, top_left, left, x, y);
+  text(g, &f_label, pct >= 1 ? RED : WHITE, BLACK, top_right, right, x + w, y);
+}
+
+// Latest run. Wide: one row of distance, pace and time. Narrow (half screen): distance and pace, then time and date.
+void lastPanel(lgfx::LovyanGFX& g, const UiData& d, int px, int py, int pw, int ph) {
+  const bool narrow = pw < 500;
+  g.fillRoundRect(px, py, pw, ph, 12, c(g, PANEL));
+  g.setClipRect(px, py, pw, ph);
+  char ln[64];
+  if (!d.last.valid) {
+    snprintf(ln, sizeof ln, "LAST %s", noun(d.kinds, false));
+    text(g, &f_label, GREY, PANEL, top_left, ln, px + 20, py + 10);
+    const char* none = d.kinds == 2 ? "No walks yet this year." : d.kinds == 3 ? "Nothing yet this year." : "No runs yet this year.";
+    text(g, &f_mid, WHITE, PANEL, top_left, none, px + 20, py + 46);
+    g.clearClipRect();
+    return;
+  }
+  char date[24] = "", dateU[24];
+  time_t t = (time_t)d.last.start_local;
+  struct tm tmv;
+  gmtime_r(&t, &tmv);
+  strftime(date, sizeof date, "%a %b %d", &tmv);
+  upper(dateU, sizeof dateU, date);
+  float mi = d.last.meters / 1609.344f;
+  char dist[20], pace[20], dur[20];
+  snprintf(dist, sizeof dist, "%.2f MI", mi);
+  if (mi > 0.05f) {
+    int sp = (int)(d.last.moving_s / mi + 0.5f);
+    snprintf(pace, sizeof pace, "%d:%02d /MI", sp / 60, sp % 60);
+  } else {
+    snprintf(pace, sizeof pace, "--");
+  }
+  uint32_t s = d.last.moving_s;
+  if (s >= 3600) snprintf(dur, sizeof dur, "%u:%02u:%02u", (unsigned)(s / 3600), (unsigned)(s / 60 % 60), (unsigned)(s % 60));
+  else snprintf(dur, sizeof dur, "%u:%02u", (unsigned)(s / 60), (unsigned)(s % 60));
+  snprintf(ln, sizeof ln, "LAST %s  -  %s", noun(d.kinds, false), d.last.name);
+  char nameU[64];
+  upper(nameU, sizeof nameU, ln);
+  if (narrow) {
+    fit(g, &f_label, nameU, pw - 40);
+    text(g, &f_label, GREY, PANEL, top_left, nameU, px + 20, py + 10);
+    text(g, &f_mid, WHITE, PANEL, top_left, dist, px + 20, py + 44);
+    text(g, &f_mid, WHITE, PANEL, top_right, pace, px + pw - 20, py + 44);
+    text(g, &f_label, GREY, PANEL, top_left, dur, px + 20, py + 88);
+    text(g, &f_label, GREY, PANEL, top_right, dateU, px + pw - 20, py + 88);
+  } else {
+    g.setFont(&f_label);
+    const int dw = g.textWidth(dateU);
+    fit(g, &f_label, nameU, pw - 40 - dw - 30);
+    text(g, &f_label, GREY, PANEL, top_left, nameU, px + 20, py + 10);
+    text(g, &f_label, GREY, PANEL, top_right, dateU, px + pw - 20, py + 10);
+    text(g, &f_mid, WHITE, PANEL, top_left, dist, px + 20, py + 44);
+    text(g, &f_mid, WHITE, PANEL, top_center, pace, px + pw / 2, py + 44);
+    text(g, &f_mid, WHITE, PANEL, top_right, dur, px + pw - 20, py + 44);
+  }
+  g.clearClipRect();
+}
+
+void weatherText(char* wx, size_t n, const UiData& d) {
+  *wx = 0;
+  if (!d.wx_valid) return;
+  if (d.wx_rain >= 30) snprintf(wx, n, "%d\u00b0  %d%% RAIN", d.wx_temp, d.wx_rain);
+  else snprintf(wx, n, "%d\u00b0  %s", d.wx_temp, d.wx_desc);
+}
+
+// One runner in the area x0..x0+w: the full screen, or one half of the split screen.
+void runner(lgfx::LovyanGFX& g, const UiData& d, int x0, int w, const char* fallback, bool icon, const char* right) {
+  const bool half = w < W;
   const float miles = d.ytd_m / 1609.344f;
   char big[24];
   formatMiles(big, sizeof big, miles, 1);
-  text(g, &f_big, WHITE, BLACK, top_center, big, 160, 32);
+  text(g, half ? &f_half : &f_big, WHITE, BLACK, top_center, big, x0 + w / 2, half ? 96 : 84);
   // header after the number: the big glyph boxes reach up into the header band
-  char wx[40] = "";
-  if (d.wx_valid) {
-    if (d.wx_rain >= 30) snprintf(wx, sizeof wx, "%d\u00b0  %d%% RAIN", d.wx_temp, d.wx_rain);
-    else snprintf(wx, sizeof wx, "%d\u00b0  %s", d.wx_temp, d.wx_desc);
-  }
-  header(g, d.athlete[0] ? d.athlete : "Next Mile Tracker", d.wifi_ok, wx);
-
+  header(g, d.athlete[0] ? d.athlete : fallback, d.wifi_ok, right, x0, w, icon);
   char lbl[64];
   snprintf(lbl, sizeof lbl, "MILES IN %d  -  %u %s", d.year, d.ytd_runs, noun(d.kinds, d.ytd_runs != 1));
-  text(g, &f_label, GREY, BLACK, top_center, lbl, 160, 123);
+  text(g, &f_label, GREY, BLACK, top_center, lbl, x0 + w / 2, half ? 236 : 268);
+  goalLine(g, d, x0 + M, half ? 278 : 304, w - 2 * M, half ? 22 : 28);
+  if (half) lastPanel(g, d, x0 + M, 352, w - 2 * M, 120);
+  else lastPanel(g, d, x0 + M, 384, w - 2 * M, 88);
+}
 
-  // goal bar
-  const int bx = 12, by = 162, bw = 296, bh = 14;
+}  // namespace
+
+void main(lgfx::LovyanGFX& g, const UiData& d) {
+  g.fillScreen(c(g, BLACK));
+  char wx[40];
+  weatherText(wx, sizeof wx, d);
+  runner(g, d, 0, W, "Next Mile Tracker", true, wx);
+  if (d.sync_error) g.fillCircle(W - 8, H - 8, 5, c(g, RED));
+}
+
+void duo(lgfx::LovyanGFX& g, const UiData& a, const UiData& b) {
+  g.fillScreen(c(g, BLACK));
+  runner(g, a, 0, W / 2, "Runner 1", false, nullptr);
+  runner(g, b, W / 2, W / 2, "Runner 2", false, nullptr);
+  g.fillRect(W / 2 - 1, 20, 2, H - 40, c(g, TRACK));
+  if (a.sync_error) g.fillCircle(8, H - 8, 5, c(g, RED));
+  if (b.sync_error) g.fillCircle(W - 8, H - 8, 5, c(g, RED));
+}
+
+void together(lgfx::LovyanGFX& g, const UiData& a, const UiData& b) {
+  g.fillScreen(c(g, BLACK));
+  const float ma = a.ytd_m / 1609.344f, mb = b.ytd_m / 1609.344f, sum = ma + mb;
+  char big[24];
+  formatMiles(big, sizeof big, sum, 1);
+  text(g, &f_big, WHITE, BLACK, top_center, big, W / 2, 84);
+  char wx[40];
+  weatherText(wx, sizeof wx, a);
+  header(g, "Together", a.wifi_ok && b.wifi_ok, wx);
+  char lbl[64];
+  snprintf(lbl, sizeof lbl, "MILES TOGETHER IN %d  -  %u %s", a.year, a.ytd_runs + b.ytd_runs,
+           a.kinds == b.kinds ? noun(a.kinds, true) : "ACTIVITIES");
+  text(g, &f_label, GREY, BLACK, top_center, lbl, W / 2, 268);
+  // One bar split into each person's share, against both goals added up.
+  const float goal = a.goal_mi + b.goal_mi;
+  const int bx = M, by = 344, bw = W - 2 * M, bh = 28;
   g.fillRoundRect(bx, by, bw, bh, bh / 2, c(g, TRACK));
-  if (d.goal_mi > 0) {
-    float pct = miles / d.goal_mi;
-    int fw = (int)(bw * (pct > 1 ? 1 : pct));
-    if (fw > 0) g.fillRoundRect(bx, by, fw < bh ? bh : fw, bh, bh / 2, c(g, RED));
-    char gm[20], left[64], right[16];
-    formatMiles(gm, sizeof gm, d.goal_mi, d.goal_auto ? 1 : 0);
-    if (pct >= 1 && d.goal_auto) {
-      char by[20];
-      formatMiles(by, sizeof by, miles - d.goal_mi, 1);
-      snprintf(left, sizeof left, "YOU BEAT %d BY %s MI!", d.last_year, by);
-    } else if (pct >= 1) {
-      snprintf(left, sizeof left, "GOAL %s MI  -  REACHED!", gm);
-    } else if (d.goal_auto) {
-      snprintf(left, sizeof left, "GOAL %s MI  -  BEAT %d", gm, d.last_year);
-    } else {
-      snprintf(left, sizeof left, "GOAL %s MI", gm);
-    }
-    snprintf(right, sizeof right, "%d%%", (int)(pct * 100 + 0.5f));
-    g.setFont(&f_label);
-    fit(g, &f_label, left, bw - g.textWidth(right) - 14);
-    text(g, &f_label, WHITE, BLACK, top_left, left, bx, 141);
-    text(g, &f_label, pct >= 1 ? RED : WHITE, BLACK, top_right, right, bx + bw, 141);
-  } else {
-    text(g, &f_label, GREY, BLACK, top_left, "TAP, THEN SCAN THE CODE TO SET A YEARLY GOAL", bx, 141);
+  const float scale = goal > 0 ? (sum > goal ? sum : goal) : (sum > 0 ? sum : 1);
+  const int wa = (int)(bw * ma / scale), wb = (int)(bw * mb / scale);
+  if (wa + wb > 0) g.fillRoundRect(bx, by, std::max(bh, wa + wb), bh, bh / 2, c(g, GREY));
+  if (wa > 0) g.fillRoundRect(bx, by, std::max(bh, wa), bh, bh / 2, c(g, RED));
+  char t[64], gm[20];
+  if (goal > 0) {
+    formatMiles(gm, sizeof gm, goal, 1);
+    snprintf(t, sizeof t, sum >= goal ? "BOTH GOALS ADDED UP: %s MI  -  BEATEN!" : "BOTH GOALS ADDED UP: %s MI", gm);
+    text(g, &f_label, WHITE, BLACK, top_left, t, bx, 304);
+    snprintf(t, sizeof t, "%d%%", (int)(sum / goal * 100 + 0.5f));
+    text(g, &f_label, sum >= goal ? RED : WHITE, BLACK, top_right, t, bx + bw, 304);
   }
-
-  // last run panel
-  const int px = 12, py = 186, pw = 296, ph = 48;
-  g.fillRoundRect(px, py, pw, ph, 6, c(g, PANEL));
-  g.setClipRect(px, py, pw, ph);  // the big font's background box runs past the panel's bottom edge
-  if (d.last.valid) {
-    char date[24] = "";
-    time_t t = (time_t)d.last.start_local;
-    struct tm tmv;
-    gmtime_r(&t, &tmv);
-    strftime(date, sizeof date, "%a %b %d", &tmv);
-    char dateU[24];
-    upper(dateU, sizeof dateU, date);
-    g.setFont(&f_label);
-    int dw = g.textWidth(dateU);
-    char name[64];
-    snprintf(name, sizeof name, "LAST %s  -  %s", noun(d.kinds, false), d.last.name);
-    char nameU[64];
-    upper(nameU, sizeof nameU, name);
-    const int nameW = pw - 20 - dw - 16;
-    fit(g, &f_label, nameU, nameW);
-    g.setClipRect(px + 10, py, nameW, ph);
-    text(g, &f_label, GREY, PANEL, top_left, nameU, px + 10, py + 5);
-    g.setClipRect(px, py, pw, ph);
-    text(g, &f_label, GREY, PANEL, top_right, dateU, px + pw - 10, py + 5);
-
-    float mi = d.last.meters / 1609.344f;
-    char dist[20], pace[20], dur[20];
-    snprintf(dist, sizeof dist, "%.2f MI", mi);
-    if (mi > 0.05f) {
-      int sp = (int)(d.last.moving_s / mi + 0.5f);
-      snprintf(pace, sizeof pace, "%d:%02d /MI", sp / 60, sp % 60);
-    } else {
-      snprintf(pace, sizeof pace, "--");
-    }
-    uint32_t s = d.last.moving_s;
-    if (s >= 3600) snprintf(dur, sizeof dur, "%u:%02u:%02u", (unsigned)(s / 3600), (unsigned)(s / 60 % 60), (unsigned)(s % 60));
-    else snprintf(dur, sizeof dur, "%u:%02u", (unsigned)(s / 60), (unsigned)(s % 60));
-    text(g, &f_mid, WHITE, PANEL, top_left, dist, px + 10, py + 22);
-    text(g, &f_mid, WHITE, PANEL, top_center, pace, px + pw / 2 + 6, py + 22);
-    text(g, &f_mid, WHITE, PANEL, top_right, dur, px + pw - 10, py + 22);
-  } else {
-    char ln[24];
-    snprintf(ln, sizeof ln, "LAST %s", noun(d.kinds, false));
-    text(g, &f_label, GREY, PANEL, top_left, ln, px + 10, py + 5);
-    const char* none = d.kinds == 2 ? "No walks yet this year. Go get one!" : d.kinds == 3 ? "Nothing yet this year. Get moving!"
-                                                                                        : "No runs yet this year. Go get one!";
-    text(g, &f_mid, WHITE, PANEL, top_left, none, px + 10, py + 22);
+  // Who did what, under the bar, in the bar's colours.
+  const UiData* who[2] = {&a, &b};
+  const float mi[2] = {ma, mb};
+  for (int i = 0; i < 2; i++) {
+    const int px = i ? W / 2 + 10 : M, pw = W / 2 - M - 10;
+    g.fillRoundRect(px, 392, pw, 80, 12, c(g, PANEL));
+    g.fillRoundRect(px + 20, 420, 24, 24, 6, c(g, i ? GREY : RED));
+    char nm[40], num[24];
+    upper(nm, sizeof nm, who[i]->athlete[0] ? who[i]->athlete : i ? "Runner 2" : "Runner 1");
+    formatMiles(num, sizeof num, mi[i], 1);
+    strcat(num, " MI");
+    g.setFont(&f_mid);
+    const int nw = g.textWidth(num);
+    fit(g, &f_mid, nm, pw - 84 - nw - 20);
+    text(g, &f_mid, WHITE, PANEL, middle_left, nm, px + 60, 432);
+    text(g, &f_mid, WHITE, PANEL, middle_right, num, px + pw - 20, 432);
   }
-  g.clearClipRect();
-  if (d.sync_error) g.fillCircle(312, 232, 3, c(g, RED));
 }
 
 namespace {
-const int LIST_Y = 62, ROW_H = 42, BTN_Y = 192, BTN_H = 44;
-// Phone-style keyboard sized for a finger: 4 rows of 47 px under a 48 px top bar.
-const int KB_Y = 50, KEY_H = 47;
+const int LIST_Y = 124, ROW_H = 82, BTN_Y = 384, BTN_H = 88;
+// Phone-style keyboard sized for a finger: 4 rows of 94 px under a 100 px top bar.
+const int KB_Y = 100, KEY_H = 94;
 const char* const KB_ROWS[4][3] = {
     {"qwertyuiop", "asdfghjkl", "zxcvbnm"},
     {"QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"},
@@ -305,20 +394,20 @@ int layout(int layer, Key* out) {
   for (int r = 0; r < 3; r++) {
     const char* row = KB_ROWS[layer][r];
     const int len = strlen(row), y = KB_Y + r * KEY_H;
-    const int w = r < 2 ? 32 : 224 / len, x0 = r < 2 ? (320 - w * len) / 2 : 48;
+    const int w = r < 2 ? 80 : 560 / len, x0 = r < 2 ? (800 - w * len) / 2 : 120;
     for (int i = 0; i < len; i++) out[n++] = {x0 + i * w, y, w, KEY_H, row[i]};
   }
   const int y2 = KB_Y + 2 * KEY_H, y3 = KB_Y + 3 * KEY_H;
-  out[n++] = {0, y2, 48, KEY_H, ui::KB_SHIFT};
-  out[n++] = {272, y2, 48, KEY_H, ui::KB_DEL};
-  out[n++] = {0, y3, 72, KEY_H, ui::KB_SYM};
-  out[n++] = {72, y3, 120, KEY_H, ' '};
-  out[n++] = {192, y3, 128, KEY_H, ui::KB_OK};
+  out[n++] = {0, y2, 120, KEY_H, ui::KB_SHIFT};
+  out[n++] = {680, y2, 120, KEY_H, ui::KB_DEL};
+  out[n++] = {0, y3, 180, KEY_H, ui::KB_SYM};
+  out[n++] = {180, y3, 300, KEY_H, ' '};
+  out[n++] = {480, y3, 320, KEY_H, ui::KB_OK};
   return n;
 }
 
 void button(lgfx::LovyanGFX& g, int x, int y, int w, int h, const char* label, uint32_t bg, uint32_t fg) {
-  g.fillRoundRect(x, y, w, h, 6, c(g, bg));
+  g.fillRoundRect(x, y, w, h, 12, c(g, bg));
   text(g, &f_label, fg, bg, middle_center, label, x + w / 2, y + h / 2);
 }
 
@@ -344,7 +433,7 @@ void drawKey(lgfx::LovyanGFX& g, const Key& k, int layer, bool down) {
   bool special = k.code < 0 || k.code == ' ';
   uint32_t bg = down ? WHITE : k.code == ui::KB_OK ? RED : special ? TRACK : PANEL;
   uint32_t fg = down ? BLACK : (k.code == ui::KB_OK ? 0xFFFFFF : WHITE);
-  g.fillRoundRect(k.x + 1, k.y + 1, k.w - 2, k.h - 2, 5, c(g, bg));
+  g.fillRoundRect(k.x + 3, k.y + 3, k.w - 6, k.h - 6, 10, c(g, bg));
   text(g, special ? &f_label : &f_mid, fg, bg, middle_center, label, k.x + k.w / 2, k.y + k.h / 2);
 }
 }  // namespace
@@ -354,59 +443,59 @@ void wifiList(lgfx::LovyanGFX& g, const WifiNet* nets, int n, int first, bool sc
   header(g, "Welcome!", true);
   char e[64];
   upper(e, sizeof e, error && *error ? error : "Step 1 of 2  -  tap your home WiFi");
-  fit(g, &f_label, e, 296);
-  text(g, &f_label, RED, BLACK, top_left, e, 12, 44);
+  fit(g, &f_label, e, 740);
+  text(g, &f_label, RED, BLACK, top_left, e, 30, 86);
   if (scanning) {
-    text(g, &f_mid, WHITE, BLACK, top_center, "Looking for WiFi...", 160, 104);
-    text(g, &f_body, GREY, BLACK, top_center, "This takes a few seconds.", 160, 136);
+    text(g, &f_mid, WHITE, BLACK, top_center, "Looking for WiFi...", 400, 200);
+    text(g, &f_body, GREY, BLACK, top_center, "This takes a few seconds.", 400, 260);
   } else if (n == 0) {
-    text(g, &f_mid, WHITE, BLACK, top_center, "No WiFi found.", 160, 104);
-    text(g, &f_body, GREY, BLACK, top_center, "Tap Look again.", 160, 136);
+    text(g, &f_mid, WHITE, BLACK, top_center, "No WiFi found.", 400, 200);
+    text(g, &f_body, GREY, BLACK, top_center, "Tap Look again.", 400, 260);
   }
   for (int i = 0; !scanning && i < NET_ROWS && first + i < n; i++) {
     const WifiNet& w = nets[first + i];
     int y = LIST_Y + i * ROW_H;
-    g.fillRoundRect(12, y, 296, ROW_H - 4, 6, c(g, PANEL));
+    g.fillRoundRect(30, y, 740, ROW_H - 8, 12, c(g, PANEL));
     char name[40];
     strncpy(name, w.ssid, sizeof name - 1);
     name[sizeof name - 1] = 0;
-    fit(g, &f_mid, name, 240);
-    text(g, &f_mid, WHITE, PANEL, middle_left, name, 22, y + (ROW_H - 4) / 2);
+    fit(g, &f_mid, name, 620);
+    text(g, &f_mid, WHITE, PANEL, middle_left, name, 54, y + (ROW_H - 8) / 2);
     int bars = w.rssi > -60 ? 3 : w.rssi > -72 ? 2 : 1;
-    for (int b = 0; b < 3; b++) g.fillRect(278 + b * 7, y + 27 - b * 5 - 6, 5, b * 5 + 6, c(g, b < bars ? WHITE : DIM));
+    for (int b = 0; b < 3; b++) g.fillRect(700 + b * 16, y + 54 - b * 12 - 14, 11, b * 12 + 14, c(g, b < bars ? WHITE : DIM));
   }
-  button(g, 12, BTN_Y, 92, BTN_H, "LOOK AGAIN", TRACK, WHITE);
-  if (!scanning && n > NET_ROWS) button(g, 114, BTN_Y, 92, BTN_H, first + NET_ROWS < n ? "MORE WIFI" : "BACK TO TOP", TRACK, WHITE);
-  button(g, 216, BTN_Y, 92, BTN_H, "USE MY PHONE", TRACK, WHITE);
+  button(g, 30, BTN_Y, 230, BTN_H, "LOOK AGAIN", TRACK, WHITE);
+  if (!scanning && n > NET_ROWS) button(g, 285, BTN_Y, 230, BTN_H, first + NET_ROWS < n ? "MORE WIFI" : "BACK TO TOP", TRACK, WHITE);
+  button(g, 540, BTN_Y, 230, BTN_H, "USE MY PHONE", TRACK, WHITE);
 }
 
 int wifiListHit(int x, int y, int n, int first) {
   if (y >= BTN_Y - 4) {
-    if (x < 109) return LIST_AGAIN;
-    if (x < 211) return n > NET_ROWS ? LIST_MORE : LIST_NONE;
+    if (x < 272) return LIST_AGAIN;
+    if (x < 527) return n > NET_ROWS ? LIST_MORE : LIST_NONE;
     return LIST_PHONE;
   }
-  if (y < LIST_Y - 2) return LIST_NONE;
+  if (y < LIST_Y - 4) return LIST_NONE;
   int i = (y - LIST_Y) / ROW_H;
   return i < NET_ROWS && first + i < n ? first + i : LIST_NONE;
 }
 
 void wifiPasswordField(lgfx::LovyanGFX& g, const char* pass) {
-  g.fillRoundRect(64, 20, 254, 27, 5, c(g, PANEL));
+  g.fillRoundRect(156, 40, 636, 54, 10, c(g, PANEL));
   g.setFont(&f_mid);
   if (!*pass) {
-    text(g, &f_body, DIM, PANEL, middle_left, "Type your WiFi password", 72, 33);
-    g.fillRect(70, 23, 2, 21, c(g, RED));
+    text(g, &f_body, DIM, PANEL, middle_left, "Type your WiFi password", 176, 67);
+    g.fillRect(170, 47, 3, 40, c(g, RED));
     return;
   }
   const char* p = pass;
-  while (*p && g.textWidth(p) > 236) p++;  // show the end while typing a long one
-  text(g, &f_mid, WHITE, PANEL, middle_left, p, 72, 33);
-  g.fillRect(74 + g.textWidth(p), 23, 2, 21, c(g, RED));
+  while (*p && g.textWidth(p) > 590) p++;  // show the end while typing a long one
+  text(g, &f_mid, WHITE, PANEL, middle_left, p, 176, 67);
+  g.fillRect(180 + g.textWidth(p), 47, 3, 40, c(g, RED));
 }
 
 void wifiKeyboard(lgfx::LovyanGFX& g, int layer) {
-  g.fillRect(0, KB_Y, 320, 240 - KB_Y, c(g, BLACK));
+  g.fillRect(0, KB_Y, 800, 480 - KB_Y, c(g, BLACK));
   Key ks[48];
   const int n = layout(layer, ks);
   for (int i = 0; i < n; i++) drawKey(g, ks[i], layer, false);
@@ -414,21 +503,21 @@ void wifiKeyboard(lgfx::LovyanGFX& g, int layer) {
 
 void wifiPassword(lgfx::LovyanGFX& g, const char* ssid, const char* pass, int layer, const char* error) {
   g.fillScreen(c(g, BLACK));
-  button(g, 2, 2, 56, 44, "< BACK", TRACK, WHITE);
+  button(g, 4, 4, 140, 88, "< BACK", TRACK, WHITE);
   char t[64];
   if (error && *error) {
     upper(t, sizeof t, error);
   } else {
     snprintf(t, sizeof t, "PASSWORD FOR %s", ssid);
   }
-  fit(g, &f_label, t, 250);
-  text(g, &f_label, error && *error ? RED : GREY, BLACK, top_left, t, 66, 2);
+  fit(g, &f_label, t, 630);
+  text(g, &f_label, error && *error ? RED : GREY, BLACK, top_left, t, 160, 4);
   wifiPasswordField(g, pass);
   wifiKeyboard(g, layer);
 }
 
 int wifiKeyHit(int x, int y, int layer) {
-  if (y < KB_Y) return x < 62 ? KB_BACK : KB_NONE;
+  if (y < KB_Y) return x < 150 ? KB_BACK : KB_NONE;
   Key k;
   return keyAt(x, y, layer, k) ? k.code : KB_NONE;
 }
@@ -441,78 +530,78 @@ void wifiKeyFlash(lgfx::LovyanGFX& g, int x, int y, int layer, bool down) {
 void wifiPhone(lgfx::LovyanGFX& g, const char* apName, bool failed) {
   g.fillScreen(c(g, BLACK));
   header(g, "Use your phone", true);
-  text(g, &f_label, RED, BLACK, top_left, failed ? "THAT DIDN'T CONNECT. TRY AGAIN." : "STEP 1 OF 2  -  YOUR HOME WIFI", 12, 44);
+  text(g, &f_label, RED, BLACK, top_left, failed ? "THAT DIDN'T CONNECT. TRY AGAIN." : "STEP 1 OF 2  -  YOUR HOME WIFI", 30, 86);
   char wifiQr[64];
   snprintf(wifiQr, sizeof wifiQr, "WIFI:T:nopass;S:%s;;", apName);
-  qr(g, wifiQr, 18, 68, 104);
-  int y = wrap(g, &f_body, WHITE, 140, 68, 172, 19, "Open your phone's camera, point it at this code, and tap Join.");
-  wrap(g, &f_body, GREY, 140, y + 8, 172, 19, "A page opens to pick your home WiFi.");
-  button(g, 12, BTN_Y, 296, BTN_H, "BACK TO THE WIFI LIST", TRACK, WHITE);
+  qr(g, wifiQr, 50, 140, 208);
+  int y = wrap(g, &f_body, WHITE, 310, 140, 460, 36, "Open your phone's camera, point it at this code, and tap Join.");
+  wrap(g, &f_body, GREY, 310, y + 16, 460, 36, "A page opens to pick your home WiFi.");
+  button(g, 30, BTN_Y, 740, BTN_H, "BACK TO THE WIFI LIST", TRACK, WHITE);
 }
 
 void wifiRetry(lgfx::LovyanGFX& g, const char* ssid) {
   g.fillScreen(c(g, BLACK));
   header(g, "WiFi not found", false);
-  text(g, &f_mid, WHITE, BLACK, top_center, "Looking for:", 160, 60);
+  text(g, &f_mid, WHITE, BLACK, top_center, "Looking for:", 400, 120);
   char s[48];
   snprintf(s, sizeof s, "\"%s\"", ssid);
-  text(g, &f_title, WHITE, BLACK, top_center, s, 160, 88);
-  text(g, &f_body, GREY, BLACK, top_center, "It keeps trying on its own.", 160, 132);
-  g.drawFastHLine(12, 166, 296, c(g, GREY));
-  text(g, &f_body, WHITE, BLACK, top_center, "New router or new home?", 160, 178);
-  text(g, &f_body, WHITE, BLACK, top_center, "Tap here to set up WiFi again.", 160, 200);
+  text(g, &f_title, WHITE, BLACK, top_center, s, 400, 170);
+  text(g, &f_body, GREY, BLACK, top_center, "It keeps trying on its own.", 400, 256);
+  g.fillRect(30, 330, 740, 2, c(g, GREY));
+  text(g, &f_body, WHITE, BLACK, top_center, "New router or new home?", 400, 356);
+  text(g, &f_body, WHITE, BLACK, top_center, "Tap here to set up WiFi again.", 400, 400);
 }
 
 void linkStrava(lgfx::LovyanGFX& g, const char* url, const char* ip, bool relink) {
   g.fillScreen(c(g, BLACK));
   header(g, relink ? "Reconnect your watch" : "WiFi connected!", true);
-  text(g, &f_label, RED, BLACK, top_left, relink ? "YOUR WATCH APP NEEDS TO RECONNECT" : "STEP 2 OF 2  -  YOUR WATCH APP", 12, 46);
-  qr(g, url, 18, 78, 104);
-  int y = wrap(g, &f_body, WHITE, 140, 70, 172, 19, "Point your phone's camera at this code and pick your watch.");
-  wrap(g, &f_body, GREY, 140, y + 8, 172, 19, "Your phone needs to be on your home WiFi.");
-  g.drawFastHLine(12, 196, 296, c(g, GREY));
+  text(g, &f_label, RED, BLACK, top_left, relink ? "YOUR WATCH APP NEEDS TO RECONNECT" : "STEP 2 OF 2  -  YOUR WATCH APP", 30, 86);
+  qr(g, url, 50, 150, 208);
+  int y = wrap(g, &f_body, WHITE, 310, 140, 460, 36, "Point your phone's camera at this code and pick your watch.");
+  wrap(g, &f_body, GREY, 310, y + 16, 460, 36, "Your phone needs to be on your home WiFi.");
+  g.fillRect(30, 396, 740, 2, c(g, GREY));
   char u[48];
   snprintf(u, sizeof u, "No camera? Go to %s", ip);
-  text(g, &f_body, WHITE, BLACK, top_center, u, 160, 206);
+  text(g, &f_body, WHITE, BLACK, top_center, u, 400, 420);
 }
 
 void message(lgfx::LovyanGFX& g, const char* title, const char* line1, const char* line2) {
   g.fillScreen(c(g, BLACK));
   header(g, "Next Mile Tracker", true);
-  text(g, &f_title, WHITE, BLACK, top_center, title, 160, 90);
-  if (line1) text(g, &f_body, GREY, BLACK, top_center, line1, 160, 136);
-  if (line2) text(g, &f_body, GREY, BLACK, top_center, line2, 160, 158);
+  text(g, &f_title, WHITE, BLACK, top_center, title, 400, 180);
+  if (line1) text(g, &f_body, GREY, BLACK, top_center, line1, 400, 262);
+  if (line2) text(g, &f_body, GREY, BLACK, top_center, line2, 400, 304);
 }
 
 void info(lgfx::LovyanGFX& g, const char* url, const char* ip, const char* ssid, bool ledAlways) {
   g.fillScreen(c(g, BLACK));
   header(g, "Settings", true);
-  qr(g, url, 18, 58, 104);
-  const char* ls[] = {"Scan to change your", "goal, screen or WiFi."};
-  lines(g, &f_body, WHITE, 140, 54, 19, ls, 2);
+  qr(g, url, 50, 118, 192);
+  const char* ls[] = {"Scan to change your goal,", "screen, runners or WiFi."};
+  lines(g, &f_body, WHITE, 300, 106, 34, ls, 2);
   char u[40];
   snprintf(u, sizeof u, "http://%s", ip);
-  text(g, &f_body, WHITE, BLACK, top_left, u, 140, 102);
+  text(g, &f_body, WHITE, BLACK, top_left, u, 300, 186);
   char w[48];
   snprintf(w, sizeof w, "WiFi: %s", ssid);
   char wf[48];
   strcpy(wf, w);
-  fit(g, &f_body, wf, 168);
-  text(g, &f_body, GREY, BLACK, top_left, wf, 140, 126);
-  text(g, &f_body, GREY, BLACK, top_left, "Data from your watch", 140, 150);
-  for (int x : {18, 164}) {
-    g.fillRoundRect(x, THEME_BTN_Y, 138, THEME_BTN_H, 6, c(g, PANEL));
-    g.drawRoundRect(x, THEME_BTN_Y, 138, THEME_BTN_H, 6, c(g, RED));
+  fit(g, &f_body, wf, 470);
+  text(g, &f_body, GREY, BLACK, top_left, wf, 300, 230);
+  text(g, &f_body, GREY, BLACK, top_left, "Data from your watch", 300, 274);
+  for (int x : {30, 410}) {
+    g.fillRoundRect(x, THEME_BTN_Y, 360, THEME_BTN_H, 12, c(g, PANEL));
+    g.drawRoundRect(x, THEME_BTN_Y, 360, THEME_BTN_H, 12, c(g, RED));
   }
   char t[48], tn[24];
   upper(tn, sizeof tn, THEMES[cur].name);
   snprintf(t, sizeof t, "COLORS: %s", tn);
-  fit(g, &f_label, t, 130);
-  text(g, &f_label, WHITE, PANEL, middle_center, t, 87, THEME_BTN_Y + THEME_BTN_H / 2);
-  text(g, &f_label, WHITE, PANEL, middle_center, ledAlways ? "LIGHT: ALWAYS ON" : "LIGHT: NEW MILES", 233,
+  fit(g, &f_label, t, 340);
+  text(g, &f_label, WHITE, PANEL, middle_center, t, 210, THEME_BTN_Y + THEME_BTN_H / 2);
+  text(g, &f_label, WHITE, PANEL, middle_center, ledAlways ? "LIGHT: ALWAYS ON" : "LIGHT: NEW MILES", 590,
        THEME_BTN_Y + THEME_BTN_H / 2);
-  text(g, &f_label, DIM, BLACK, top_center, "HOLD 10 SECONDS TO ERASE & START OVER", 160, 201);
-  text(g, &f_label, DIM, BLACK, top_center, "TAP ANYWHERE ELSE TO GO BACK", 160, 219);
+  text(g, &f_label, DIM, BLACK, top_center, "HOLD 10 SECONDS TO ERASE & START OVER", 400, 412);
+  text(g, &f_label, DIM, BLACK, top_center, "TAP ANYWHERE ELSE TO GO BACK", 400, 444);
 }
 
 void resetHold(lgfx::LovyanGFX& g, int secondsLeft) {
@@ -520,10 +609,10 @@ void resetHold(lgfx::LovyanGFX& g, int secondsLeft) {
   header(g, "Start over?", true);
   char n[8];
   snprintf(n, sizeof n, "%d", secondsLeft);
-  text(g, &f_big, RED, BLACK, top_center, n, 160, 46);
-  text(g, &f_mid, WHITE, BLACK, top_center, "Keep holding to erase", 160, 140);
-  text(g, &f_mid, WHITE, BLACK, top_center, "WiFi, watch link and goal.", 160, 164);
-  text(g, &f_body, GREY, BLACK, top_center, "Let go to cancel.", 160, 200);
+  text(g, &f_big, RED, BLACK, top_center, n, 400, 84);
+  text(g, &f_mid, WHITE, BLACK, top_center, "Keep holding to erase", 400, 300);
+  text(g, &f_mid, WHITE, BLACK, top_center, "WiFi, watch links and goals.", 400, 346);
+  text(g, &f_body, GREY, BLACK, top_center, "Let go to cancel.", 400, 414);
 }
 
 namespace {
@@ -532,11 +621,11 @@ struct Flake {
   uint32_t rgb;  // 0 = theme accent
   int16_t dx, dy, w, h;
   bool drawn;
-  lgfx::rgb565_t under[25];
+  lgfx::rgb565_t under[100];
 };
-constexpr int FLAKES = 22;
+constexpr int FLAKES = 48;
 const uint32_t FLAKE_RGB[] = {0xFFC83D, 0xFF5FA2, 0x3DD6FF, 0x6BE36B, 0xFFFFFF, 0};
-const uint8_t FLAKE_SZ[4][2] = {{5, 3}, {3, 5}, {2, 5}, {3, 5}};  // cycling sizes make each flake look like it tumbles
+const uint8_t FLAKE_SZ[4][2] = {{10, 6}, {6, 10}, {4, 10}, {6, 10}};  // cycling sizes make each flake look like it tumbles
 Flake flakes[FLAKES];
 bool flakesInit = false;
 uint32_t flakesAt = 0;
@@ -544,10 +633,10 @@ uint32_t flakesAt = 0;
 float frand(float a, float b) { return a + (b - a) * (rand() % 1000) / 1000.0f; }
 
 void spawn(Flake& f, int w, float y) {
-  f.x = frand(6, w - 9);
+  f.x = frand(12, w - 22);
   f.y = y;
-  f.vy = frand(9, 20);
-  f.sway = frand(2, 7);
+  f.vy = frand(18, 40);
+  f.sway = frand(4, 14);
   f.phase = frand(0, 6.28f);
   f.rgb = FLAKE_RGB[rand() % (sizeof FLAKE_RGB / sizeof FLAKE_RGB[0])];
 }
@@ -582,7 +671,7 @@ void confettiStep(lgfx::LovyanGFX& g, uint32_t ms) {
   for (int i = 0; i < FLAKES; i++) {
     Flake& f = flakes[i];
     f.y += f.vy * dt;
-    if (f.y > H) spawn(f, W, -frand(2, 30));
+    if (f.y > H) spawn(f, W, -frand(4, 60));
     const uint8_t* sz = FLAKE_SZ[(ms / 240 + (int)(f.phase * 10)) % 4];
     nx[i] = (int)(f.x + f.sway * sinf(f.phase + ms / 800.0f));
     ny[i] = (int)f.y;

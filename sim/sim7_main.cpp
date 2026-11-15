@@ -1,0 +1,92 @@
+// CrowPanel 7" desktop renderer (800x480): draws each tracker screen into an off-screen sprite and saves a PPM.
+#define LGFX_USE_V1
+#include <LovyanGFX.hpp>
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
+#include "../firmware-crowpanel7/src/ui.h"
+
+static void save(LGFX_Sprite& s, const char* path) {
+  FILE* f = fopen(path, "wb");
+  fprintf(f, "P6\n%d %d\n255\n", s.width(), s.height());
+  for (int y = 0; y < s.height(); y++)
+    for (int x = 0; x < s.width(); x++) {
+      uint16_t p = s.readPixel(x, y);
+      unsigned char rgb[3] = {(unsigned char)(((p >> 11) & 31) * 255 / 31),
+                              (unsigned char)(((p >> 5) & 63) * 255 / 63),
+                              (unsigned char)((p & 31) * 255 / 31)};
+      fwrite(rgb, 1, 3, f);
+    }
+  fclose(f);
+}
+
+int main() {
+  LGFX_Sprite s;
+  s.setColorDepth(16);
+  s.createSprite(800, 480);
+  ui::init();
+
+  UiData d;
+  strcpy(d.athlete, "Don S.");
+  d.year = 2026; d.ytd_m = 412.6f * 1609.344f; d.ytd_runs = 87;
+  d.last_year = 2025; d.last_year_mi = 545; d.goal_mi = 600; d.goal_auto = true;
+  d.last.valid = true; strcpy(d.last.name, "Morning Run"); d.last.meters = 5.21f * 1609.344f;
+  d.last.moving_s = 50 * 60 + 22; d.last.start_local = 1794470400 + 7 * 3600;  // Tue Nov 10 2026
+  d.wx_valid = true; d.wx_temp = 53; d.wx_rain = 0; d.wx_desc = "CLEAR";
+  ui::main(s, d); save(s, "out7/main.ppm");
+  for (uint32_t ms = 1000; ms <= 3000; ms += 50) ui::confettiStep(s, ms);
+  save(s, "out7/main_confetti.ppm");
+  ui::confettiClear(s); save(s, "out7/main_confetti_cleared.ppm");
+  ui::confettiReset();
+  UiData dr = d; dr.wx_temp = 61; dr.wx_rain = 70; ui::main(s, dr); save(s, "out7/main_rain.ppm");
+
+  UiData d2 = d; strcpy(d2.athlete, "Jessica Martinez-Thompson"); d2.ytd_m = 1288.4f * 1609.344f; d2.ytd_runs = 241;
+  d2.goal_auto = false; d2.goal_mi = 1200; strcpy(d2.last.name, "Pacegiving 2026 - Roseville Charity Run 10K");
+  d2.last.meters = 6.21f * 1609.344f; d2.last.moving_s = 3725; d2.wifi_ok = false;
+  ui::main(s, d2); save(s, "out7/main_goal_reached.ppm");
+  UiData d4 = d; strcpy(d4.athlete, "Don"); d4.ytd_m = 95.8f * 1609.344f; d4.ytd_runs = 91; d4.kinds = 3; d4.goal_mi = 90; d4.goal_auto = true; strcpy(d4.last.name, "Walk");
+  ui::main(s, d4); save(s, "out7/main_goal_reached_auto.ppm");
+  UiData d5 = d; d5.last_year_mi = 374.4f; d5.goal_mi = 374.4f; d5.ytd_m = 301.7f * 1609.344f; ui::main(s, d5); save(s, "out7/main_goal_exact.ppm");
+  d5.ytd_m = 380.2f * 1609.344f; ui::main(s, d5); save(s, "out7/main_goal_beat.ppm");
+
+  UiData d3; strcpy(d3.athlete, "Alex R."); d3.year = 2027; d3.goal_mi = 0;
+  ui::main(s, d3); save(s, "out7/main_new_year_no_goal.ppm");
+
+  {
+    UiData a = d, b = d;
+    strcpy(b.athlete, "Jamie S.");
+    b.ytd_m = 287.3f * 1609.344f; b.ytd_runs = 61; b.goal_mi = 412.0f; b.last_year_mi = 412.0f;
+    strcpy(b.last.name, "Sunday Long Run"); b.last.meters = 16093; b.last.moving_s = 5520;
+    ui::duo(s, a, b); save(s, "out7/duo.ppm");
+    for (uint32_t ms = 1000; ms <= 3000; ms += 50) ui::confettiStep(s, ms);
+    save(s, "out7/duo_confetti.ppm");
+    ui::confettiClear(s); ui::confettiReset();
+    ui::together(s, a, b); save(s, "out7/together.ppm");
+  }
+  ui::WifiNet nets[] = {{"DS3DESIGN", -48, false}, {"Schomer-Home", -63, false}, {"NETGEAR-Guest-Network-Extended", -70, false}, {"xfinitywifi", -80, true}, {"Linksys", -85, false}};
+  ui::wifiList(s, nets, 5, 0, false, nullptr); save(s, "out7/setup_wifi.ppm");
+  ui::wifiList(s, nets, 0, 0, true, nullptr); save(s, "out7/setup_wifi_scanning.ppm");
+  ui::wifiList(s, nets, 5, 4, false, "Couldn't reach DS3DESIGN. Move closer to the router."); save(s, "out7/setup_wifi_more.ppm");
+  ui::wifiPassword(s, "DS3DESIGN", "", 0, nullptr); save(s, "out7/setup_wifi_keys.ppm");
+  ui::wifiPassword(s, "DS3DESIGN", "Running2026!", 2, "That password didn't work. Try again."); save(s, "out7/setup_wifi_keys_sym.ppm");
+  ui::wifiPassword(s, "DS3DESIGN", "Run", 1, nullptr); save(s, "out7/setup_wifi_keys_caps.ppm");
+  ui::wifiPassword(s, "DS3DESIGN", "Run2026", 3, nullptr); save(s, "out7/setup_wifi_keys_sym2.ppm");
+  ui::wifiPhone(s, "NextMile-Setup", false); save(s, "out7/setup_wifi_phone.ppm");
+  ui::wifiRetry(s, "Schomer-Home"); save(s, "out7/wifi_retry.ppm");
+  ui::linkStrava(s, "http://192.168.1.42/link", "192.168.1.42", false); save(s, "out7/setup_strava.ppm");
+  ui::message(s, "Loading your runs...", "Adding up this year's miles.", nullptr); save(s, "out7/loading.ppm");
+  ui::info(s, "http://192.168.1.42/", "192.168.1.42", "Schomer-Home"); save(s, "out7/info.ppm");
+  for (int t = 0; t < ui::themeCount(); t++) {
+    char p[40];
+    snprintf(p, sizeof p, "out7/theme_%d.ppm", t);
+    ui::setTheme(t);
+    ui::main(s, d);
+    save(s, p);
+  }
+  ui::setTheme(1);
+  ui::info(s, "http://192.168.1.42/", "192.168.1.42", "Schomer-Home"); save(s, "out7/info_daylight.ppm");
+  ui::setTheme(0);
+  ui::resetHold(s, 6); save(s, "out7/reset.ppm");
+  ui::wifiRetry(s, "Schomer-Home"); save(s, "out7/wifi_retry.ppm");
+  return 0;
+}

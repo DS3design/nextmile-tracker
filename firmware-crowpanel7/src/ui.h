@@ -34,13 +34,16 @@ struct UiData {
 };
 
 namespace ui {
-constexpr int THEME_BTN_Y = 172, THEME_BTN_H = 26;  // "Colors" button on the settings screen
+constexpr int THEME_BTN_Y = 330, THEME_BTN_H = 64;  // "Colors" button on the settings screen
 int themeCount();
 const char* themeName(int i);
 void setTheme(int i);
 uint32_t accent();  // current theme's accent colour, 0xRRGGBB
 void init();
 void main(lgfx::LovyanGFX& g, const UiData& d);
+// Two-runner mode: split down the middle, and a tap shows the pair's combined miles.
+void duo(lgfx::LovyanGFX& g, const UiData& a, const UiData& b);
+void together(lgfx::LovyanGFX& g, const UiData& a, const UiData& b);
 // A few confetti flakes drifting down over the main screen; each flake saves and restores what's under it.
 void confettiStep(lgfx::LovyanGFX& g, uint32_t ms);
 void confettiClear(lgfx::LovyanGFX& g);  // put back what the flakes covered
