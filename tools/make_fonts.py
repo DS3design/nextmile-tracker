@@ -5,7 +5,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, '..', 'firmware', 'src', 'fonts_gen.h')
 ASCII = ''.join(chr(c) for c in range(32, 127))
 
-FONTS = [
+FONTS_CYD = [
     # name, ttf, {axis: value}, pixel size, chars
     ('font_big',   'Oswald.ttf', {'wght': 600}, 76, ' 0123456789,.-'),
     ('font_title', 'Oswald.ttf', {'wght': 600}, 26, ASCII),
@@ -13,6 +13,19 @@ FONTS = [
     ('font_label', 'Oswald.ttf', {'wght': 500}, 15, ASCII + '\u00b0'),
     ('font_body',  'Inter.ttf',  {'wght': 500, 'opsz': 14}, 14, ASCII),
 ]
+
+FONTS_7 = [
+    ('font_big',   'Oswald.ttf', {'wght': 600}, 170, ' 0123456789,.-'),
+    ('font_half',  'Oswald.ttf', {'wght': 600}, 120, ' 0123456789,.-'),
+    ('font_title', 'Oswald.ttf', {'wght': 600}, 46, ASCII),
+    ('font_mid',   'Oswald.ttf', {'wght': 500}, 34, ASCII),
+    ('font_label', 'Oswald.ttf', {'wght': 500}, 26, ASCII + '\u00b0'),
+    ('font_body',  'Inter.ttf',  {'wght': 500, 'opsz': 14}, 24, ASCII),
+]
+# python3 make_fonts.py 7  -> fonts for the CrowPanel 7" (800x480)
+SEVEN = len(sys.argv) > 1 and sys.argv[1] == '7'
+FONTS = FONTS_7 if SEVEN else FONTS_CYD
+if SEVEN: OUT = os.path.join(HERE, '..', 'firmware-crowpanel7', 'src', 'fonts_gen.h')
 
 def set_axes(face, axes):
     info = face.get_variation_info()
