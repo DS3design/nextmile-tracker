@@ -175,7 +175,9 @@ void handleRoot() {
   if (app::cfg.led == 2) b += F(" checked");
   b += F("> Keep the light on the back on all the time</label><div class=dim>Otherwise it glows for 6 hours after new miles and flashes on milestones. It uses your color theme.</div><button>Save</button></form>");
 
-  b += F("<h2>More</h2><form method=post action=/sync><button class=ghost>Refresh miles now</button></form>");
+  b += F("<h2>More</h2><form method=post action=/sync>");
+  b += rIn(r);
+  b += F("<button class=ghost>Refresh miles now</button></form>");
   if (app::cfg.duo) {
     src::use(1);
     if (!src::linked()) b += F("<a class=btn href='/link?r=1'>Link the second runner's watch</a>");
@@ -303,7 +305,7 @@ void linkedPage() {
   sendPage("You're all set", "<p>Linked to " + String(src::label(src::kind())) + (n.length() ? " as <b>" + n + "</b>" : String("")) +
                                  ". Your tracker is loading this year's miles now.</p>" +
                                  (n.length() ? String()
-                                             : String(rIn(r) + F("<form method=post action=/name><label>Your name for the screen</label>"
+                                             : String(String(F("<form method=post action=/name>")) + rIn(r) + F("<label>Your name for the screen</label>"
                                                         "<input type=text name=name maxlength=30 autocomplete=given-name>"
                                                         "<button>Save name</button></form>"))) +
                                  "<a class='btn ghost' href='/" + rq(r) + "'>Goal &amp; settings</a>");
@@ -324,7 +326,7 @@ void handleIntervals() {
     src::Result r = src::linkIntervals(server.arg("key"));
     if (r == src::OK) return linkedPage();
     return sendPage("Key not accepted", "<p>" + String(src::describe(r)) +
-                                            ". Make sure you copied the whole key.</p><a class=btn href=/intervals>Try again</a>");
+                                            ". Make sure you copied the whole key.</p><a class=btn href='/intervals" + rq(r) + "'>Try again</a>");
   }
   sendPage("Link intervals.icu",
            String(F("<ol><li>Make a free account at intervals.icu and connect your watch under <b>Settings &rarr; Connections</b> "
@@ -344,7 +346,7 @@ void handleGarmin() {
     src::Result r = src::linkGarmin(server.arg("key"));
     if (r == src::OK) return linkedPage();
     return sendPage("Key not accepted", "<p>" + String(src::describe(r)) +
-                                            ". Make sure you copied the whole key.</p><a class=btn href=/garmin>Try again</a>");
+                                            ". Make sure you copied the whole key.</p><a class=btn href='/garmin" + rq(r) + "'>Try again</a>");
   }
   sendPage("Link Garmin",
            String(F("<ol><li>Tap <b>Open Garmin Connect</b> and sign in.</li><li>Tap <b>Create Key</b>, choose <b>1 year</b>, "
@@ -391,16 +393,16 @@ void handleExchange() {
   src::use(app::cfg.duo ? linkRunner : 0);
   src::Kind k = server.hasArg("src") ? (src::Kind)server.arg("src").toInt() : src::STRAVA;
   if (server.hasArg("error") || !server.hasArg("code")) {
-    return sendPage("Not linked", F("<p>Your watch account wasn't connected (Cancel was tapped).</p><a class=btn href=/link>Try again</a>"));
+    return sendPage("Not linked", String(F("<p>Your watch account wasn't connected (Cancel was tapped).</p><a class=btn href='/link")) + rq(linkRunner) + "'>Try again</a>");
   }
   src::Result r = src::exchange(k, server.arg("code"), server.arg("scope"));
   if (r == src::OK) return linkedPage();
   if (r == src::SCOPE) {
-    return sendPage("One more step", F("<p>The tracker needs permission to read your activities. Tap below and leave "
-                                       "the activity boxes ticked.</p><a class=btn href=/link>Try again</a>"));
+    return sendPage("One more step", String(F("<p>The tracker needs permission to read your activities. Tap below and leave "
+                                       "the activity boxes ticked.</p><a class=btn href='/link")) + rq(linkRunner) + "'>Try again</a>");
   }
   sendPage("Something went wrong", "<p>" + String(src::describe(r)) +
-                                       ". Check the tracker's WiFi and try again.</p><a class=btn href=/link>Try again</a>");
+                                       ". Check the tracker's WiFi and try again.</p><a class=btn href='/link" + rq(linkRunner) + "'>Try again</a>");
 }
 
 void handleSync() {
