@@ -1,4 +1,4 @@
-// Next Mile mile tracker: shows a runner's watch miles for the current year on an ESP32 CYD.
+// Next Mile mile tracker: shows a runner's watch miles for the current year on an Elecrow CrowPanel Advance 7".
 #include <Arduino.h>
 #include <ESPmDNS.h>
 #include <JPEGDEC.h>
@@ -30,7 +30,7 @@ const uint32_t INFO_TIMEOUT_MS = 60UL * 1000;
 const uint32_t OTA_FIRST_MS = 3UL * 60 * 1000, OTA_EVERY_MS = 24UL * 60 * 60 * 1000, HEALTHY_MS = 2UL * 60 * 1000;
 const uint32_t HOLD_SHOW_MS = 2000, HOLD_RESET_MS = 10000, TAP_MAX_MS = 1500;
 
-LGFX lcd;
+#define lcd (board::lcd())  // the board version is only known once board::detect() runs
 WiFiManager wm;
 Preferences prefs;
 JPEGDEC jpeg;
@@ -60,7 +60,7 @@ bool pressed = false;
 uint32_t pressStart = 0, lastTouch = 0;
 int holdShown = -1;
 
-int jpegYOffset = 0;
+int jpegYOffset = 0, jpegXOffset = 0;
 int blNow = -1;
 bool swallowTap = false;
 
@@ -79,13 +79,15 @@ int localYear() {
 }
 
 int jpegDraw(JPEGDRAW* p) {
-  lcd.pushImage(p->x, p->y + jpegYOffset, p->iWidth, p->iHeight, (lgfx::swap565_t*)p->pPixels);
+  lcd.pushImage(p->x + jpegXOffset, p->y + jpegYOffset, p->iWidth, p->iHeight, (lgfx::swap565_t*)p->pPixels);
   return 1;
 }
 
-bool drawJpeg(uint8_t* buf, size_t len, int yOffset) {
-  jpegYOffset = yOffset;
+// Draws the JPEG centred on the screen.
+bool drawJpeg(uint8_t* buf, size_t len) {
   if (!jpeg.openRAM(buf, len, jpegDraw)) return false;
+  jpegXOffset = (lcd.width() - jpeg.getWidth()) / 2;
+  jpegYOffset = (lcd.height() - jpeg.getHeight()) / 2;
   jpeg.setPixelType(RGB565_BIG_ENDIAN);
   lcd.startWrite();
   jpeg.decode(0, 0, 0);
@@ -115,7 +117,7 @@ void fade(int from, int to, int ms) {
   }
 }
 
-// intro.bin: u32 frame count, u32 fps, u32 sizes[count], then the JPEG frames (320x180, letterboxed).
+// intro.bin: u32 frame count, u32 fps, u32 sizes[count], then the JPEG frames (800x450, letterboxed).
 bool playIntro() {
   File f = LittleFS.open("/intro.bin", "r");
   if (!f) return false;
@@ -134,7 +136,7 @@ bool playIntro() {
   bool skipped = false;
   for (uint32_t i = 0; i < hdr[0] && !skipped; i++) {
     if (f.read(buf, sizes[i]) != sizes[i]) break;
-    drawJpeg(buf, sizes[i], (240 - 180) / 2);
+    drawJpeg(buf, sizes[i]);
     int32_t wait = (int32_t)(t0 + (i + 1) * frameMs - millis());
     if (wait > 0) delay(wait);
     if (i > 10 && touched()) skipped = true;
@@ -152,7 +154,7 @@ void splash() {
   uint8_t* buf = (uint8_t*)malloc(n);
   if (buf && f.read(buf, n) == n) {
     lcd.fillScreen(TFT_BLACK);
-    drawJpeg(buf, n, 0);
+    drawJpeg(buf, n);
     fade(0, app::cfg.bright, 300);
     for (int i = 0; i < 20 && !touched(); i++) delay(100);
     fade(app::cfg.bright, 0, 250);
@@ -621,7 +623,7 @@ void handleTouch() {
     }
     return;
   }
-  if (pressed && now - lastTouch > 80) {  // XPT2046 drops out briefly mid-press; wait before calling it a release
+  if (pressed && now - lastTouch > 80) {  // touch can drop out briefly mid-press; wait before calling it a release
     pressed = false;
     uint32_t held = lastTouch - pressStart;
     Serial.printf("touch up held=%u ms\n", (unsigned)held);
@@ -770,8 +772,10 @@ UiData uiData() {
 void setup() {
   Serial.begin(115200);
   bootMs = millis();
+  board::detect();
+  Serial.printf("CrowPanel %s\n", board::versionName());
   lcd.init();
-  lcd.setRotation(1);
+  lcd.setRotation(0);
   lcd.setBrightness(0);
   lcd.fillScreen(TFT_BLACK);
   lcd.fillRect(0, 0, 2, 1, TFT_RED);  // confetti needs to read the screen back

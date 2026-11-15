@@ -1,6 +1,7 @@
 #include "board.h"
 
 #include <Wire.h>
+#include <driver/i2c.h>
 
 namespace {
 

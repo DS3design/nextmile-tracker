@@ -3,17 +3,23 @@
 #include <ArduinoJson.h>
 #include <math.h>
 
+#include <Adafruit_NeoPixel.h>
+
 #include "app.h"
+#include "board.h"
 #include "net.h"
 #include "ui.h"
 
 namespace {
 
-// CYD: LDR on GPIO34 (reading rises as the room gets darker), RGB LED on 4/16/17, active low.
-const int LDR_PIN = 34, LED_R = 4, LED_G = 16, LED_B = 17;
-const int CH_R = 4, CH_G = 5, CH_B = 6;  // backlight uses LEDC channel 7
-// Untested thresholds; tune on real boards using the reading shown on the settings page.
-const int DIM_ON = 250, DIM_OFF = 150, DARK_ON = 900, DARK_OFF = 600;
+// CrowPanel 7": TSL2561 light sensor in the Grove I2C socket, a short 5V addressable LED strip on board::ledPin().
+// The reading is "darkness" so the thresholds read like the CYD's LDR: higher = darker.
+const int STRIP_LEDS = 10;
+const float STRIP_MAX = 0.35f;  // keeps 10 LEDs well inside what USB power can supply
+// Untested thresholds; tune on the real board using the reading shown on the settings page.
+const int DIM_ON = 950, DIM_OFF = 900, DARK_ON = 995, DARK_OFF = 985;
+Adafruit_NeoPixel strip(STRIP_LEDS, -1, NEO_GRB + NEO_KHZ800);
+uint8_t tslAddr = 0;
 const uint32_t DARK_OFF_AFTER_MS = 2UL * 60 * 1000, WAKE_MS = 30UL * 1000;
 const uint32_t WX_EVERY_MS = 30UL * 60 * 1000, WX_RETRY_MS = 10UL * 60 * 1000;
 const uint32_t MILESTONE_MS = 60UL * 1000;
@@ -45,16 +51,28 @@ void ledWrite(uint32_t rgb, float level) {
   // otherwise purples and pinks wash out to white.
   auto ch = [&](int v, float gain) { return (int)(255 * powf(v / 255.0f, 2.2f) * gain * level + 0.5f); };
   int r = ch((rgb >> 16) & 0xFF, 1.0f), g = ch((rgb >> 8) & 0xFF, 0.5f), b = ch(rgb & 0xFF, 1.0f);
-  ledcWrite(CH_R, 255 - r);
-  ledcWrite(CH_G, 255 - g);
-  ledcWrite(CH_B, 255 - b);
+  if (board::ledPin() < 0) return;
+  r *= STRIP_MAX, g *= STRIP_MAX, b *= STRIP_MAX;
+  for (int i = 0; i < STRIP_LEDS; i++) strip.setPixelColor(i, r, min(255, g * 2), b);  // strip green isn't trimmed
+  strip.show();
+}
+
+// TSL2561 visible+IR channel, mapped so 0 = bright daylight and 1000 = pitch dark. -1 = no sensor.
+int tslDarkness() {
+  if (!tslAddr) return -1;
+  uint8_t d[2];
+  if (!board::i2cRead(tslAddr, 0xAC, d, 2)) return -1;
+  int ch0 = d[0] | d[1] << 8;  // 402 ms, 1x gain: roughly 0 in the dark to 65535 in sunlight
+  float v = 1000 - 250 * log10f(1 + ch0);
+  return v < 0 ? 0 : (int)v;
 }
 
 void readLight() {
   uint32_t now = millis();
   if (now - lastLight < 250) return;
   lastLight = now;
-  int raw = analogRead(LDR_PIN);
+  int raw = tslDarkness();
+  if (raw < 0) return;  // no sensor plugged in: never dim
   lightAvg = lightInit ? lightAvg * 0.9f + raw * 0.1f : raw;
   lightInit = true;
   if (!dim && lightAvg > DIM_ON) dim = true;
@@ -183,14 +201,18 @@ void weatherLoop(bool netUp) {
 namespace extras {
 
 void begin() {
-  analogSetPinAttenuation(LDR_PIN, ADC_0db);  // the LDR divider only spans a few hundred mV
-  pinMode(LDR_PIN, INPUT);
-  ledcSetup(CH_R, 5000, 8);
-  ledcSetup(CH_G, 5000, 8);
-  ledcSetup(CH_B, 5000, 8);
-  ledcAttachPin(LED_R, CH_R);
-  ledcAttachPin(LED_G, CH_G);
-  ledcAttachPin(LED_B, CH_B);
+  for (uint8_t a : {0x39, 0x29, 0x49}) {  // TSL2561 address depends on its ADDR pin
+    uint8_t on[2] = {0x80, 0x03}, timing[2] = {0x81, 0x02};
+    if (board::i2cWrite(a, on, 2) && board::i2cWrite(a, timing, 2)) {
+      tslAddr = a;
+      break;
+    }
+  }
+  Serial.printf("light sensor %s\n", tslAddr ? "found" : "not found");
+  if (board::ledPin() >= 0) {
+    strip.setPin(board::ledPin());
+    strip.begin();
+  }
   ledWrite(0, 0);
 }
 
