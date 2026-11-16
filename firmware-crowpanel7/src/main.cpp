@@ -20,12 +20,13 @@
 #include "net.h"
 #include "ota.h"
 #include "source.h"
+#include "tz.h"
 #include "ui.h"
 #include "web.h"
 
 namespace {
 
-enum class Screen { None, WifiList, WifiPass, WifiPhone, Joining, Connecting, Clock, WifiRetry, Link, Main, Together, Night, Info, NotConfigured };
+enum class Screen { None, WifiList, WifiPass, WifiPhone, Joining, Connecting, Clock, WifiRetry, Link, Main, Together, Night, Settings, Scan, Entry, NotConfigured };
 
 const uint32_t RECENT_EVERY_MS = 30UL * 60 * 1000;
 const uint32_t FULL_EVERY_MS = 24UL * 60 * 60 * 1000;
@@ -39,7 +40,29 @@ Preferences prefs;
 JPEGDEC jpeg;
 
 Screen shown = Screen::None;
-bool overlayInfo = false;
+bool settingsOpen = false;
+
+// On-screen settings (Screen::Settings). Rows are rebuilt each draw; setIds maps each row to a SetId.
+enum SetTab { T_GOAL, T_RUN, T_SCR, T_LED, T_WX, T_SYS };
+const char* const SET_TABS[] = {"GOAL", "RUNNERS", "SCREEN", "LIGHTS", "WEATHER", "SYSTEM"};
+enum SetId {
+  S_PICK, S_NAME, S_GOAL, S_KINDS, S_LINK, S_DUO, S_SHARED, S_THEME, S_BRIGHT, S_ADIM, S_NIGHT, S_PHOTO,
+  S_LEDON, S_LEDFX, S_LEDN, S_PLACE, S_TZ, S_WIFI, S_OTA, S_SYNC, S_PHONE, S_ERASE
+};
+ui::SetRow setRows[9];
+int setIds[9], setCount = 0, setTab = 0, setRunner = 0;
+char setVals[9][44];
+bool setEraseArm = false;
+char setStatusBuf[60] = "";
+
+// A "scan this code" page while settings are open.
+int scanWhat = 0;  // 0 link a watch, 1 photo, 2 phone settings
+bool scanOpen = false;
+
+// Text entry on the keyboard.
+bool entryOpen = false;
+int entryField = -1;
+String entryBuf;
 uint32_t infoSince = 0;
 bool dirty = true;
 
@@ -301,7 +324,7 @@ void startPortal() {
   web::stop();
   MDNS.end();
   netUp = false;
-  overlayInfo = false;
+  settingsOpen = false;
   shown = Screen::None;
   wm.setConfigPortalBlocking(false);
   wm.setConnectTimeout(20);
@@ -574,7 +597,7 @@ void maybeSync(int i) {
   src::use(i);
 
   const bool reread = R.reloadAll;  // also redo last year, which is otherwise read only once
-  if ((t.year == 0 || reread) && shown != Screen::Info) drawLoading();
+  if ((t.year == 0 || reread) && shown != Screen::Settings && shown != Screen::Scan && shown != Screen::Entry) drawLoading();
   R.reloadAll = false;
   src::Result r = src::OK;
   syncing = true;
@@ -610,6 +633,283 @@ uint32_t otaLast = 0;
 bool otaChecked = false, wantOta = false;
 String otaStatus;
 
+// ---- On-screen settings ----------------------------------------------------------
+int setN = 0;
+void sRow(int id, ui::RowKind k, const char* label, const char* val = "", bool on = false, const char* hint = "",
+          bool danger = false) {
+  setIds[setN] = id;
+  char* v = setVals[setN];
+  strncpy(v, val, sizeof setVals[0] - 1);
+  v[sizeof setVals[0] - 1] = 0;
+  ui::SetRow& r = setRows[setN];
+  r.id = id;
+  r.kind = k;
+  r.label = label;
+  r.value = v;
+  r.on = on;
+  r.hint = hint;
+  r.danger = danger;
+  setN++;
+}
+
+const char* kindsText(uint8_t k) { return k == 2 ? "WALKS" : k == 3 ? "ALL" : "RUNS"; }
+
+int tzPick() {  // position among the labeled TZ_TABLE entries of the chosen zone
+  int i = 0;
+  for (const TzEntry& z : TZ_TABLE)
+    if (z.label) {
+      if (app::cfg.tz == z.posix) return i;
+      i++;
+    }
+  return -1;
+}
+
+void tzStep(int dir) {
+  int n = 0;
+  for (const TzEntry& z : TZ_TABLE)
+    if (z.label) n++;
+  int i = (tzPick() + dir + n) % n, j = 0;
+  for (const TzEntry& z : TZ_TABLE)
+    if (z.label && j++ == i) {
+      app::cfg.tz = z.posix;
+      app::cfg.tzManual = true;
+      app::applyTz();
+      for (int r = 0; r < app::runners(); r++) { src::use(r); app::requestSync(true); }
+      src::use(setRunner);
+      break;
+    }
+}
+
+const char* tzLabel() {
+  for (const TzEntry& z : TZ_TABLE)
+    if (z.label && app::cfg.tz == z.posix) return z.label;
+  return app::cfg.tz.c_str();
+}
+
+void openEntry(int id, const char* cur) {
+  entryField = id;
+  entryBuf = cur;
+  ui::okLabel("SAVE");
+  ui::fieldHint(id == S_PLACE ? "ZIP code or town" : "Name for the screen");
+  kbLayer = id == S_NAME ? 0 : 2;
+  entryOpen = true;
+}
+
+void setApply(int id, int dir) {  // dir: -1 left/minus, +1 right/plus, 0 the row itself
+  Settings& c = app::cfg;
+  bool save = true;
+  switch (id) {
+    case S_PICK: setRunner = dir > 0 ? 1 : 0; break;
+    case S_GOAL: {
+      float& g = app::goalOf(setRunner);
+      if (g <= 0) g = dir > 0 ? 50 : 0;
+      else g = max(0.0f, g + dir * 25);
+      break;
+    }
+    case S_KINDS:
+      app::kindsOf(setRunner) = (uint8_t)(((int)app::kindsOf(setRunner) - 1 + dir + 3) % 3 + 1);
+      src::use(setRunner);
+      app::requestSync(true);
+      break;
+    case S_NAME: openEntry(id, app::nameOf(setRunner).c_str()); break;
+    case S_LINK: scanWhat = 0; scanOpen = true; break;
+    case S_DUO:
+      c.duo = !c.duo;
+      if (c.duo) snprintf(setStatusBuf, sizeof setStatusBuf, "Now link runner 2's watch: GOAL tab, Link a watch");
+      break;
+    case S_SHARED: c.sharedGoal = max(0.0f, c.sharedGoal + dir * 50); break;
+    case S_THEME:
+      c.theme = (c.theme + dir + ui::themeCount()) % ui::themeCount();
+      ui::setTheme(c.theme);
+      break;
+    case S_BRIGHT: c.bright = constrain((int)c.bright + dir * 13, 20, 255); break;
+    case S_ADIM: c.autoDim = !c.autoDim; break;
+    case S_NIGHT: c.nightClock = !c.nightClock; break;
+    case S_PHOTO: scanWhat = 1; scanOpen = true; break;
+    case S_LEDON: c.led = c.led == 2 ? 1 : 2; break;
+    case S_LEDFX: c.ledFx = (c.ledFx + dir + ledfx::EFFECT_N) % ledfx::EFFECT_N; break;
+    case S_LEDN: c.ledCount = constrain((int)c.ledCount + dir, 1, ledfx::MAX_LEDS); break;
+    case S_PLACE: openEntry(id, c.place.c_str()); break;
+    case S_TZ: tzStep(dir); break;
+    case S_WIFI:
+      settingsOpen = false;
+      wantPortal = true;
+      save = false;
+      break;
+    case S_OTA:
+      wantOta = true;
+      snprintf(setStatusBuf, sizeof setStatusBuf, "Checking for an update...");
+      break;
+    case S_SYNC:
+      src::use(setRunner);
+      app::requestSync(true);
+      snprintf(setStatusBuf, sizeof setStatusBuf, "Refreshing miles...");
+      break;
+    case S_PHONE: scanWhat = 2; scanOpen = true; break;
+    case S_ERASE:
+      if (setEraseArm) return factoryReset();
+      setEraseArm = true;
+      snprintf(setStatusBuf, sizeof setStatusBuf, "Tap ERASE again to wipe WiFi, links and settings.");
+      save = false;
+      break;
+    default: break;
+  }
+  if (save) app::saveSettings();
+}
+
+void buildRows() {
+  setN = 0;
+  Settings& c = app::cfg;
+  switch (setTab) {
+    case T_GOAL: {
+      if (c.duo) sRow(S_PICK, ui::ROW_CHOICE, "Editing", app::nameOf(setRunner).length() ? app::nameOf(setRunner).c_str() : setRunner ? "RUNNER 2" : "RUNNER 1");
+      sRow(S_NAME, ui::ROW_TEXT, "Name on screen", app::nameOf(setRunner).length() ? app::nameOf(setRunner).c_str() : "");
+      char v[24];
+      const float g = app::goalOf(setRunner);
+      if (g > 0) snprintf(v, sizeof v, "%d MI", (int)g);
+      else strncpy(v, "BEAT LAST YEAR", sizeof v);
+      sRow(S_GOAL, ui::ROW_STEP, "Yearly goal", v, false, "Blank = beat last year");
+      sRow(S_KINDS, ui::ROW_CHOICE, "Count my", kindsText(app::kindsOf(setRunner)));
+      sRow(S_LINK, ui::ROW_ACTION, c.duo && setRunner ? "Link runner 2's watch" : "Link a watch or app");
+      break;
+    }
+    case T_RUN:
+      sRow(S_DUO, ui::ROW_TOGGLE, "Two runners", "", c.duo, "Each links their own watch");
+      if (c.duo) {
+        char v[16];
+        if (c.sharedGoal > 0) snprintf(v, sizeof v, "%d MI", (int)c.sharedGoal);
+        else strncpy(v, "ADDED UP", sizeof v);
+        sRow(S_SHARED, ui::ROW_STEP, "Shared goal", v, false, "Blank = your goals added up");
+      }
+      sRow(0, ui::ROW_LINE, "Tap the miles to see both runners together.");
+      break;
+    case T_SCR:
+      sRow(S_THEME, ui::ROW_CHOICE, "Colors", ui::themeName(c.theme));
+      { char v[12]; snprintf(v, sizeof v, "%d%%", c.bright * 100 / 255); sRow(S_BRIGHT, ui::ROW_STEP, "Brightness", v); }
+      sRow(S_ADIM, ui::ROW_TOGGLE, "Dim in a dark room", "", c.autoDim);
+      sRow(S_NIGHT, ui::ROW_TOGGLE, "Night clock", "", c.nightClock, "Dim clock instead of off");
+      sRow(S_PHOTO, ui::ROW_ACTION, "Photo behind the miles");
+      break;
+    case T_LED:
+      sRow(S_LEDON, ui::ROW_TOGGLE, "Lights always on", "", c.led == 2, "Off: glow 6 h on new miles");
+      sRow(S_LEDFX, ui::ROW_CHOICE, "New-miles effect", ledfx::name(c.ledFx));
+      { char v[12]; snprintf(v, sizeof v, "%d", c.ledCount); sRow(S_LEDN, ui::ROW_STEP, "Lights on the strip", v); }
+      break;
+    case T_WX:
+      sRow(S_PLACE, ui::ROW_TEXT, "ZIP or town", c.place.length() ? c.place.c_str() : "");
+      sRow(S_TZ, ui::ROW_CHOICE, "Time zone", tzLabel(), false, "For the new-year reset");
+      break;
+    default:
+      sRow(S_WIFI, ui::ROW_ACTION, "Change WiFi");
+      sRow(S_SYNC, ui::ROW_ACTION, "Refresh miles now");
+      sRow(S_OTA, ui::ROW_ACTION, "Check for update");
+      sRow(S_PHONE, ui::ROW_ACTION, "Phone settings (QR)");
+      sRow(S_ERASE, ui::ROW_ACTION, "Erase everything", "", false, "", true);
+      break;
+  }
+  setCount = setN;
+}
+
+void drawSettings() {
+  buildRows();
+  ui::settings(lcd, SET_TABS, 6, setTab, setRows, setCount, setStatusBuf);
+}
+
+void drawScan() {
+  String url = "http://" + app::ip();
+  switch (scanWhat) {
+    case 0:
+      ui::scan(lcd, "Link a watch", (url + (setRunner ? "/link?r=1" : "/link")).c_str(),
+               "Point your phone's camera at this code and pick your watch.",
+               "Your phone needs to be on your home WiFi.", nullptr);
+      break;
+    case 1:
+      ui::scan(lcd, "Add a photo", url.c_str(),
+               "Open the settings page on your phone, tap Photo, and pick a picture.",
+               "It shows faintly behind the miles.", LittleFS.exists("/photo.jpg") ? "REMOVE PHOTO" : nullptr);
+      break;
+    default:
+      ui::scan(lcd, "Phone settings", url.c_str(), "Scan to open this tracker's settings on your phone.",
+               "Your phone needs to be on your home WiFi.", nullptr);
+      break;
+  }
+}
+
+void settingsTap() {
+  infoSince = millis();
+  if (touchX >= 800 - 30 - 110 && touchY <= 72) {  // DONE
+    settingsOpen = false;
+    dirty = true;
+    return;
+  }
+  const int tab = ui::settingsTabAt(touchX, touchY);
+  if (tab >= 0 && tab < 6) {
+    setTab = tab;
+    setEraseArm = false;
+    setStatusBuf[0] = 0;
+    dirty = true;
+    return;
+  }
+  const int h = ui::settingsHit(touchX, touchY, setCount);
+  if (h < 0) return;
+  const int row = h / 2;
+  const ui::RowKind k = setRows[row].kind;
+  int dir = 0;
+  if (k == ui::ROW_STEP || k == ui::ROW_CHOICE) dir = h % 2 ? 1 : -1;
+  else if (k == ui::ROW_TOGGLE) dir = 1;
+  setApply(setIds[row], dir);
+  dirty = true;
+}
+
+void scanTap() {
+  infoSince = millis();
+  if (scanWhat == 1 && ui::scanHit(touchX, touchY) == 1) {  // REMOVE PHOTO
+    LittleFS.remove("/photo.jpg");
+    app::photoChanged();
+  }
+  scanOpen = false;
+  dirty = true;
+}
+
+void entryTap() {
+  infoSince = millis();
+  const int k = ui::wifiKeyHit(touchX, touchY, kbLayer);
+  keyCode = ui::KB_NONE;
+  if (k == ui::KB_NONE) return;
+  if (k == ui::KB_BACK) {
+    entryOpen = false;
+    dirty = true;
+    return;
+  }
+  if (k == ui::KB_OK) {
+    entryBuf.trim();
+    if (entryField == S_NAME) app::nameOf(setRunner) = entryBuf;
+    else if (entryField == S_PLACE) {
+      if (entryBuf != app::cfg.place) {
+        app::cfg.place = entryBuf;
+        extras::locationChanged();
+      }
+    }
+    app::saveSettings();
+    entryOpen = false;
+    dirty = true;
+    return;
+  }
+  const int was = kbLayer;
+  if (k == ui::KB_SHIFT) kbLayer = kbLayer < 2 ? kbLayer ^ 1 : kbLayer == 2 ? 3 : 2;
+  else if (k == ui::KB_SYM) kbLayer = kbLayer < 2 ? 2 : 0;
+  else if (k == ui::KB_DEL) entryBuf.remove(entryBuf.length() ? entryBuf.length() - 1 : 0);
+  else if (entryBuf.length() < 40) {
+    entryBuf += (char)k;
+    if (kbLayer == 1) kbLayer = 0;
+  }
+  lcd.startWrite();
+  if (kbLayer != was) ui::wifiKeyboard(lcd, kbLayer);
+  else ui::wifiKeyFlash(lcd, touchX, touchY, kbLayer, false);
+  ui::wifiPasswordField(lcd, entryBuf.c_str());
+  lcd.endWrite();
+}
+
 void otaProgress(int pct) {
   char b[32];
   snprintf(b, sizeof b, "Downloading... %d%%", pct);
@@ -621,7 +921,7 @@ void maybeOta() {
   if (now - bootMs > HEALTHY_MS) ota::markHealthy();
   if (!netUp || portalActive || !ota::enabled()) return;
   bool due = wantOta || (!otaChecked && now - bootMs > OTA_FIRST_MS) || (otaChecked && now - otaLast > OTA_EVERY_MS);
-  if (!due || shown == Screen::Info) return;
+  if (!due || shown == Screen::Settings || shown == Screen::Scan || shown == Screen::Entry) return;
   wantOta = false;
   otaChecked = true;
   otaLast = now;
@@ -636,8 +936,9 @@ Screen baseScreen() {
   if (portalActive)
     return setupView == SetupView::Pass ? Screen::WifiPass : setupView == SetupView::Phone ? Screen::WifiPhone : Screen::WifiList;
   bool showData = anyData();
+  if (showData && settingsOpen)
+    return entryOpen ? Screen::Entry : scanOpen ? Screen::Scan : Screen::Settings;
   if (showData && extras::night() && timeValid()) return Screen::Night;
-  if (showData && overlayInfo && netUp) return Screen::Info;
   if (showData) return together && duoShown() ? Screen::Together : Screen::Main;
   if (!netUp) return (everConnected || millis() - bootMs > 30000) ? Screen::WifiRetry : Screen::Connecting;
   if (!timeValid()) return Screen::Clock;
@@ -666,7 +967,9 @@ void draw(Screen s) {
       ui::night(lcd, r, duoShown() ? 2 : 1, hm, l.tm_hour < 12 ? "AM" : "PM", date);
       break;
     }
-    case Screen::Info: ui::info(lcd, ("http://" + ip + "/").c_str(), ip.c_str(), WiFi.SSID().c_str(), app::cfg.led == 2); break;
+    case Screen::Settings: drawSettings(); break;
+    case Screen::Scan: drawScan(); break;
+    case Screen::Entry: ui::textEntry(lcd, entryField == S_PLACE ? "Your ZIP or town" : "Name on the screen", entryBuf.c_str(), kbLayer); break;
     case Screen::Link: ui::linkStrava(lcd, ("http://" + ip + "/link").c_str(), ip.c_str(), run[0].needRelink); break;
     case Screen::WifiRetry: ui::wifiRetry(lcd, WiFi.SSID().c_str()); break;
     case Screen::Connecting: ui::message(lcd, "Connecting...", "Joining your WiFi.", nullptr); break;
@@ -693,32 +996,22 @@ void onTap() {
       } else if (duoShown()) {  // two runners: tap to the combined miles, then to settings
         together = true;
         infoSince = millis();
-      } else if (netUp) {
-        overlayInfo = true;
+      } else {
+        settingsOpen = true;
+        setTab = T_GOAL;
+        setEraseArm = false;
+        setStatusBuf[0] = 0;
         infoSince = millis();
       }
       break;
     case Screen::Together:
       together = false;
-      if (netUp) {
-        overlayInfo = true;
-        infoSince = millis();
-      }
+      settingsOpen = true;
+      infoSince = millis();
       break;
-    case Screen::Info:
-      if (touchY >= ui::THEME_BTN_Y - 10 && touchY <= ui::THEME_BTN_Y + ui::THEME_BTN_H + 6) {
-        if (touchX < 400) {
-          app::cfg.theme = (app::cfg.theme + 1) % ui::themeCount();
-          ui::setTheme(app::cfg.theme);
-        } else {
-          app::cfg.led = app::cfg.led == 2 ? 1 : 2;
-        }
-        app::saveSettings();
-        infoSince = millis();
-      } else {
-        overlayInfo = false;
-      }
-      break;
+    case Screen::Settings: settingsTap(); break;
+    case Screen::Scan: scanTap(); break;
+    case Screen::Entry: entryTap(); break;
     case Screen::WifiRetry: wantPortal = true; break;
     case Screen::WifiList:
     case Screen::WifiPass:
@@ -743,7 +1036,7 @@ void handleTouch() {
       extras::dismiss();
       applyBacklight();
     }
-    if (shown == Screen::WifiPass && !swallowTap) trackKey();
+    if ((shown == Screen::WifiPass || shown == Screen::Entry) && !swallowTap) trackKey();
     uint32_t held = now - pressStart;
     if (held >= HOLD_RESET_MS) factoryReset();
     if (held >= HOLD_SHOW_MS) {
@@ -848,7 +1141,7 @@ void onLinked() {
   r.backoffUntil = 0;
   r.syncedOnce = false;
   snap();
-  overlayInfo = false;
+  settingsOpen = false;
   dirty = true;
 }
 
@@ -1048,8 +1341,8 @@ void loop() {
     snap();
   }
   maybeSync();
-  extras::setSetup(shown != Screen::Main && shown != Screen::Together && shown != Screen::Night && shown != Screen::Info &&
-                   shown != Screen::None);
+  extras::setSetup(shown != Screen::Main && shown != Screen::Together && shown != Screen::Night &&
+                   shown != Screen::Settings && shown != Screen::Scan && shown != Screen::Entry && shown != Screen::None);
   extras::loop(netUp && !portalActive);
   updatePace();
   applyBacklight();
@@ -1058,8 +1351,9 @@ void loop() {
   static int shownMin = -1;  // night clock: redraw when the minute changes
   if (shown == Screen::Night && time(nullptr) / 60 != shownMin) shownMin = time(nullptr) / 60, dirty = true;
 
-  if ((overlayInfo || together) && millis() - infoSince > INFO_TIMEOUT_MS) {
-    overlayInfo = together = false;
+  if ((settingsOpen || together) && millis() - infoSince > INFO_TIMEOUT_MS) {
+    settingsOpen = together = false;
+    scanOpen = entryOpen = false;
     dirty = true;
   }
 

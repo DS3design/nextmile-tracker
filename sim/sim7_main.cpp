@@ -114,7 +114,57 @@ int main() {
   ui::wifiRetry(s, "Schomer-Home"); save(s, "out7/wifi_retry.ppm");
   ui::linkStrava(s, "http://192.168.1.42/link", "192.168.1.42", false); save(s, "out7/setup_strava.ppm");
   ui::message(s, "Loading your runs...", "Adding up this year's miles.", nullptr); save(s, "out7/loading.ppm");
-  ui::info(s, "http://192.168.1.42/", "192.168.1.42", "Schomer-Home"); save(s, "out7/info.ppm");
+  {
+    const char* tabs[] = {"GOAL", "RUNNERS", "SCREEN", "LIGHTS", "WEATHER", "SYSTEM"};
+    ui::SetRow g[] = {
+      {0, ui::ROW_CHOICE, "Editing", "DON"},
+      {1, ui::ROW_TEXT, "Name on screen", "Don"},
+      {2, ui::ROW_STEP, "Yearly goal", "500 MI", false, "Blank = beat last year"},
+      {3, ui::ROW_CHOICE, "Count my", "ALL"},
+      {4, ui::ROW_ACTION, "Link a watch or app"},
+    };
+    ui::settings(s, tabs, 6, 0, g, 5, ""); save(s, "out7/set_goal.ppm");
+    ui::SetRow rr[] = {
+      {5, ui::ROW_TOGGLE, "Two runners", "", true, "Each links their own watch"},
+      {6, ui::ROW_STEP, "Shared goal", "ADDED UP", false, "Blank = your goals added up"},
+      {0, ui::ROW_LINE, "Tap the miles to see both runners together."},
+    };
+    ui::settings(s, tabs, 6, 1, rr, 3, "Now link runner 2's watch: GOAL tab, Link a watch"); save(s, "out7/set_runners.ppm");
+    ui::SetRow sc[] = {
+      {7, ui::ROW_CHOICE, "Colors", "EMBER"},
+      {8, ui::ROW_STEP, "Brightness", "100%"},
+      {9, ui::ROW_TOGGLE, "Dim in a dark room", "", true},
+      {10, ui::ROW_TOGGLE, "Night clock", "", true, "Dim clock instead of off"},
+      {11, ui::ROW_ACTION, "Photo behind the miles"},
+    };
+    ui::settings(s, tabs, 6, 2, sc, 5, ""); save(s, "out7/set_screen.ppm");
+    ui::SetRow le[] = {
+      {12, ui::ROW_TOGGLE, "Lights always on", "", false, "Off: glow 6 h on new miles"},
+      {13, ui::ROW_CHOICE, "New-miles effect", "MIX"},
+      {14, ui::ROW_STEP, "Lights on the strip", "10"},
+    };
+    ui::settings(s, tabs, 6, 3, le, 3, ""); save(s, "out7/set_lights.ppm");
+    ui::SetRow wx[] = {
+      {15, ui::ROW_TEXT, "ZIP or town", "Roseville"},
+      {16, ui::ROW_CHOICE, "Time zone", "Pacific", false, "For the new-year reset"},
+    };
+    ui::settings(s, tabs, 6, 4, wx, 2, ""); save(s, "out7/set_weather.ppm");
+    ui::SetRow sy[] = {
+      {17, ui::ROW_ACTION, "Change WiFi"},
+      {18, ui::ROW_ACTION, "Refresh miles now"},
+      {19, ui::ROW_ACTION, "Check for update"},
+      {20, ui::ROW_ACTION, "Phone settings (QR)"},
+      {21, ui::ROW_ACTION, "Erase everything", "", false, "", true},
+    };
+    ui::settings(s, tabs, 6, 5, sy, 5, ""); save(s, "out7/set_system.ppm");
+    ui::scan(s, "Link a watch", "http://192.168.1.42/link?r=1",
+             "Point your phone's camera at this code and pick your watch.",
+             "Your phone needs to be on your home WiFi.", nullptr); save(s, "out7/scan_link.ppm");
+    ui::scan(s, "Add a photo", "http://192.168.1.42/",
+             "Open the settings page on your phone, tap Photo, and pick a picture.",
+             "It shows faintly behind the miles.", "REMOVE PHOTO"); save(s, "out7/scan_photo.ppm");
+    ui::textEntry(s, "Name on the screen", "Don", 0); save(s, "out7/entry_name.ppm");
+  }
   for (int t = 0; t < ui::themeCount(); t++) {
     char p[40];
     snprintf(p, sizeof p, "out7/theme_%d.ppm", t);
@@ -123,7 +173,7 @@ int main() {
     save(s, p);
   }
   ui::setTheme(1);
-  ui::info(s, "http://192.168.1.42/", "192.168.1.42", "Schomer-Home"); save(s, "out7/info_daylight.ppm");
+  // info screen replaced by the Settings pages above
   ui::setTheme(0);
   ui::resetHold(s, 6); save(s, "out7/reset.ppm");
   ui::wifiRetry(s, "Schomer-Home"); save(s, "out7/wifi_retry.ppm");

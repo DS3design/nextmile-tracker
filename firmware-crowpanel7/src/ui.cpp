@@ -98,6 +98,9 @@ void drawIcon(lgfx::LovyanGFX& g, int x0, int y0, uint32_t bg) {
 }
 
 constexpr int W = 800, H = 480, M = 30;  // screen and side margin
+
+const char* okTxt = "CONNECT";
+const char* hintTxt = "Type your WiFi password";
 constexpr int IW = ICON_W * 2, IH = ICON_H * 2;
 
 // Title across the top of the area x0..x0+w, with the Next Mile icon and an accent line under it.
@@ -563,7 +566,7 @@ void drawKey(lgfx::LovyanGFX& g, const Key& k, int layer, bool down) {
     case ui::KB_SHIFT: label = layer == 0 ? "ABC" : layer == 1 ? "abc" : layer == 2 ? "#+=" : "123"; break;
     case ui::KB_SYM: label = layer < 2 ? "123" : "abc"; break;
     case ui::KB_DEL: label = "DEL"; break;
-    case ui::KB_OK: label = "CONNECT"; break;
+    case ui::KB_OK: label = okTxt; break;
     case ' ': label = "SPACE"; break;
     default: label = ch;
   }
@@ -621,7 +624,7 @@ void wifiPasswordField(lgfx::LovyanGFX& g, const char* pass) {
   g.fillRoundRect(156, 40, 636, 54, 10, c(g, PANEL));
   g.setFont(&f_mid);
   if (!*pass) {
-    text(g, &f_body, DIM, PANEL, middle_left, "Type your WiFi password", 176, 67);
+    text(g, &f_body, DIM, PANEL, middle_left, hintTxt, 176, 67);
     g.fillRect(170, 47, 3, 40, c(g, RED));
     return;
   }
@@ -638,7 +641,23 @@ void wifiKeyboard(lgfx::LovyanGFX& g, int layer) {
   for (int i = 0; i < n; i++) drawKey(g, ks[i], layer, false);
 }
 
+void okLabel(const char* l) { okTxt = l; }
+void fieldHint(const char* h) { hintTxt = h; }
+
+void textEntry(lgfx::LovyanGFX& g, const char* title, const char* value, int layer) {
+  g.fillScreen(c(g, BLACK));
+  button(g, 4, 4, 140, 88, "< BACK", TRACK, WHITE);
+  char t[64];
+  upper(t, sizeof t, title);
+  fit(g, &f_label, t, 630);
+  text(g, &f_label, GREY, BLACK, top_left, t, 160, 4);
+  wifiPasswordField(g, value);
+  wifiKeyboard(g, layer);
+}
+
 void wifiPassword(lgfx::LovyanGFX& g, const char* ssid, const char* pass, int layer, const char* error) {
+  okLabel("CONNECT");
+  fieldHint("Type your WiFi password");
   g.fillScreen(c(g, BLACK));
   button(g, 4, 4, 140, 88, "< BACK", TRACK, WHITE);
   char t[64];
@@ -710,37 +729,6 @@ void message(lgfx::LovyanGFX& g, const char* title, const char* line1, const cha
   if (line2) text(g, &f_body, GREY, BLACK, top_center, line2, 400, 304);
 }
 
-void info(lgfx::LovyanGFX& g, const char* url, const char* ip, const char* ssid, bool ledAlways) {
-  g.fillScreen(c(g, BLACK));
-  header(g, "Settings", true);
-  qr(g, url, 50, 118, 192);
-  const char* ls[] = {"Scan to change your goal,", "screen, runners or WiFi."};
-  lines(g, &f_body, WHITE, 300, 106, 34, ls, 2);
-  char u[40];
-  snprintf(u, sizeof u, "http://%s", ip);
-  text(g, &f_body, WHITE, BLACK, top_left, u, 300, 186);
-  char w[48];
-  snprintf(w, sizeof w, "WiFi: %s", ssid);
-  char wf[48];
-  strcpy(wf, w);
-  fit(g, &f_body, wf, 470);
-  text(g, &f_body, GREY, BLACK, top_left, wf, 300, 230);
-  text(g, &f_body, GREY, BLACK, top_left, "Data from your watch", 300, 274);
-  for (int x : {30, 410}) {
-    g.fillRoundRect(x, THEME_BTN_Y, 360, THEME_BTN_H, 12, c(g, PANEL));
-    g.drawRoundRect(x, THEME_BTN_Y, 360, THEME_BTN_H, 12, c(g, RED));
-  }
-  char t[48], tn[24];
-  upper(tn, sizeof tn, THEMES[cur].name);
-  snprintf(t, sizeof t, "COLORS: %s", tn);
-  fit(g, &f_label, t, 340);
-  text(g, &f_label, WHITE, PANEL, middle_center, t, 210, THEME_BTN_Y + THEME_BTN_H / 2);
-  text(g, &f_label, WHITE, PANEL, middle_center, ledAlways ? "LIGHT: ALWAYS ON" : "LIGHT: NEW MILES", 590,
-       THEME_BTN_Y + THEME_BTN_H / 2);
-  text(g, &f_label, DIM, BLACK, top_center, "HOLD 10 SECONDS TO ERASE & START OVER", 400, 412);
-  text(g, &f_label, DIM, BLACK, top_center, "TAP ANYWHERE ELSE TO GO BACK", 400, 444);
-}
-
 void resetHold(lgfx::LovyanGFX& g, int secondsLeft) {
   g.fillScreen(c(g, BLACK));
   header(g, "Start over?", true);
@@ -769,6 +757,91 @@ uint32_t flakesAt = 0;
 
 float frand(float a, float b) { return a + (b - a) * (rand() % 1000) / 1000.0f; }
 
+// ---- On-screen settings ------------------------------------------------------
+const int TAB_X = M, TAB_W = 150, TAB_Y0 = 100, TAB_H = 66, TAB_GAP = 10;
+const int SROW_X = 200, SROW_W = W - SROW_X - M, SROW_Y0 = 100, SROW_H = 72, SROW_GAP = 8;
+const int CTL_Y = SROW_H / 2 - 26, CTL_W = 52, CTL_H = 52, VAL_W = 108;
+const int CTL_X = SROW_X + SROW_W - (2 * CTL_W + VAL_W) - 16;
+
+void sTab(lgfx::LovyanGFX& g, int i, const char* name, bool on) {
+  char t[24];
+  upper(t, sizeof t, name);
+  const int y = TAB_Y0 + i * (TAB_H + TAB_GAP);
+  g.fillRoundRect(TAB_X, y, TAB_W, TAB_H, 12, c(g, on ? PANEL : BLACK));
+  if (on) g.drawRoundRect(TAB_X, y, TAB_W, TAB_H, 12, c(g, RED));
+  text(g, &f_label, on ? WHITE : DIM, on ? PANEL : BLACK, middle_center, t, TAB_X + TAB_W / 2, y + TAB_H / 2);
+}
+
+
+
+void sRowDraw(lgfx::LovyanGFX& g, int i, const SetRow& r) {
+  const int y = SROW_Y0 + i * (SROW_H + SROW_GAP);
+  if (r.kind == ROW_TITLE) {
+    char t[32];
+    upper(t, sizeof t, r.label);
+    text(g, &f_label, RED, BLACK, middle_left, t, SROW_X, y + SROW_H / 2);
+    return;
+  }
+  if (r.kind == ROW_LINE) {
+    char t[80];
+    strncpy(t, r.label, sizeof t - 1);
+    t[sizeof t - 1] = 0;
+    fit(g, &f_body, t, SROW_W - 40);
+    text(g, &f_body, DIM, BLACK, middle_center, t, SROW_X + SROW_W / 2, y + SROW_H / 2);
+    return;
+  }
+  const uint32_t pbg = r.kind == ROW_ACTION && r.danger ? 0x380808 : PANEL;
+  g.fillRoundRect(SROW_X, y, SROW_W, SROW_H, 12, c(g, pbg));
+  char lbl[48];
+  strncpy(lbl, r.label, sizeof lbl - 1);
+  lbl[sizeof lbl - 1] = 0;
+  if (r.kind == ROW_ACTION) {
+    upper(lbl, sizeof lbl, lbl);
+    text(g, &f_label, r.danger ? 0xFF8080 : WHITE, pbg, middle_center, lbl, SROW_X + SROW_W / 2, y + SROW_H / 2);
+    return;
+  }
+  if (*r.hint) {
+    fit(g, &f_label, lbl, SROW_W - 200);
+    text(g, &f_label, WHITE, pbg, middle_left, lbl, SROW_X + 16, y + SROW_H / 2 - 14);
+    char h[70];
+    strncpy(h, r.hint, sizeof h - 1);
+    h[sizeof h - 1] = 0;
+    fit(g, &f_body, h, SROW_W - 200);
+    text(g, &f_body, DIM, pbg, middle_left, h, SROW_X + 16, y + SROW_H / 2 + 18);
+  } else {
+    fit(g, &f_label, lbl, SROW_W - 200);
+    text(g, &f_label, WHITE, pbg, middle_left, lbl, SROW_X + 16, y + SROW_H / 2);
+  }
+  const int cy = y + CTL_Y;
+  switch (r.kind) {
+    case ROW_TOGGLE: {
+      const uint32_t bg = r.on ? RED : TRACK, fg = r.on ? 0xFFFFFF : WHITE;
+      g.fillRoundRect(SROW_X + SROW_W - 110 - 16, cy + 10, 110, 32, 16, c(g, bg));
+      g.fillCircle(SROW_X + SROW_W - 110 - 16 + (r.on ? 94 : 16), cy + 26, 12, c(g, fg));
+      break;
+    }
+    case ROW_CHOICE:
+    case ROW_STEP:
+      button(g, CTL_X, cy, CTL_W, CTL_H, r.kind == ROW_CHOICE ? "<" : "-", TRACK, WHITE);
+      button(g, CTL_X + CTL_W + VAL_W, cy, CTL_W, CTL_H, r.kind == ROW_CHOICE ? ">" : "+", TRACK, WHITE);
+      { char v[24]; strncpy(v, r.value, sizeof v - 1); v[sizeof v - 1] = 0; fit(g, &f_label, v, VAL_W - 8);
+        text(g, &f_label, WHITE, pbg, middle_center, v, CTL_X + CTL_W + VAL_W / 2, cy + CTL_H / 2); }
+      break;
+    case ROW_TEXT: {
+      char v[32];
+      strncpy(v, *r.value ? r.value : "-", sizeof v - 1);
+      v[sizeof v - 1] = 0;
+      fit(g, &f_label, v, CTL_X - SROW_X - 40);
+      text(g, &f_label, WHITE, pbg, middle_right, v, SROW_X + SROW_W - 16, y + SROW_H / 2);
+      break;
+    }
+    default: break;
+  }
+}
+
+
+
+
 void spawn(Flake& f, int w, float y) {
   f.x = frand(12, w - 22);
   f.y = y;
@@ -778,6 +851,50 @@ void spawn(Flake& f, int w, float y) {
   f.rgb = FLAKE_RGB[rand() % (sizeof FLAKE_RGB / sizeof FLAKE_RGB[0])];
 }
 }  // namespace
+
+int settingsTabAt(int x, int y) {
+  if (x < TAB_X || x > TAB_X + TAB_W || y < TAB_Y0) return -1;
+  const int i = (y - TAB_Y0) / (TAB_H + TAB_GAP);
+  return (y - TAB_Y0 - i * (TAB_H + TAB_GAP)) <= TAB_H ? i : -1;
+}
+
+int settingsHit(int x, int y, int n) {
+  if (y < SROW_Y0 || x < SROW_X || x > SROW_X + SROW_W) return -1;
+  const int i = (y - SROW_Y0) / (SROW_H + SROW_GAP);
+  if (i >= n || y - SROW_Y0 - i * (SROW_H + SROW_GAP) > SROW_H) return -1;
+  if (x >= CTL_X && x <= CTL_X + CTL_W) return i * 2;          // minus / left
+  if (x >= CTL_X + CTL_W + VAL_W) return i * 2 + 1;            // plus / right
+  return i * 2;
+}
+
+void settings(lgfx::LovyanGFX& g, const char* const* tabs, int nTabs, int tab, const SetRow* rows, int n,
+              const char* status) {
+  g.fillScreen(c(g, BLACK));
+  header(g, "Settings", true);
+  button(g, W - M - 110, 12, 110, 60, "DONE", RED, 0xFFFFFF);
+  for (int i = 0; i < nTabs; i++) sTab(g, i, tabs[i], i == tab);
+  for (int i = 0; i < n; i++) sRowDraw(g, i, rows[i]);
+  if (status && *status) text(g, &f_body, DIM, BLACK, bottom_center, status, W / 2, H - 8);
+}
+
+void scan(lgfx::LovyanGFX& g, const char* title, const char* url, const char* line1, const char* line2,
+          const char* btn) {
+  g.fillScreen(c(g, BLACK));
+  header(g, title, true);
+  qr(g, url, 50, 130, 208);
+  int y = wrap(g, &f_body, WHITE, 310, 140, 460, 36, line1);
+  if (line2) wrap(g, &f_body, GREY, 310, y + 16, 460, 36, line2);
+  char u[64];
+  const char* p = url + (strncmp(url, "http://", 7) ? 0 : 7);
+  snprintf(u, sizeof u, "No camera? Go to %s", p);
+  text(g, &f_body, GREY, BLACK, top_center, u, 400, 380);
+  if (btn) button(g, 270, 410, 260, 60, btn, PANEL, WHITE);
+  else text(g, &f_label, DIM, BLACK, top_center, "TAP ANYWHERE TO GO BACK", 400, 430);
+}
+
+int scanHit(int x, int y) {
+  return (x >= 270 && x <= 530 && y >= 410 && y <= 470) ? 1 : 0;
+}
 
 void confettiReset() {
   for (auto& f : flakes) f.drawn = false;

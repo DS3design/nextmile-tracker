@@ -43,7 +43,6 @@ struct UiData {
 };
 
 namespace ui {
-constexpr int THEME_BTN_Y = 330, THEME_BTN_H = 64;  // "Colors" button on the settings screen
 int themeCount();
 const char* themeName(int i);
 void setTheme(int i);
@@ -78,7 +77,30 @@ void wifiPhone(lgfx::LovyanGFX& g, const char* apName, bool failed);  // WiFi co
 void wifiRetry(lgfx::LovyanGFX& g, const char* ssid);
 void linkStrava(lgfx::LovyanGFX& g, const char* url, const char* ip, bool relink);
 void message(lgfx::LovyanGFX& g, const char* title, const char* line1, const char* line2);
-void info(lgfx::LovyanGFX& g, const char* url, const char* ip, const char* ssid, bool ledAlways = false);
+// On-screen settings. The firmware supplies rows; hit-testing tells it which row and which control was tapped.
+enum RowKind { ROW_TITLE, ROW_TOGGLE, ROW_CHOICE, ROW_STEP, ROW_TEXT, ROW_ACTION, ROW_LINE };
+struct SetRow {
+  int id = 0;
+  RowKind kind = ROW_TITLE;
+  const char* label = "";    // left side (or centered for ROW_ACTION/ROW_LINE)
+  const char* value = "";    // right side for CHOICE/STEP/TEXT/TOGGLE
+  bool on = false;           // TOGGLE
+  const char* hint = "";     // dim line under the label
+  bool danger = false;       // ROW_ACTION in the warning colour
+};
+// Row index for a normal row. For CHOICE/STEP/TOGGLE: 2*index + (0 = minus/left/toggle, 1 = plus/right). -1 = none.
+int settingsHit(int x, int y, int nRows);
+int settingsTabAt(int x, int y);  // tab index, or -1
+void settings(lgfx::LovyanGFX& g, const char* const* tabs, int nTabs, int tab, const SetRow* rows, int n,
+              const char* status);
+// "Scan this code" page: big QR, text, and an optional extra button. Tap anywhere else to go back.
+void scan(lgfx::LovyanGFX& g, const char* title, const char* url, const char* line1, const char* line2,
+          const char* btn);
+int scanHit(int x, int y);  // 0 back, 1 the extra button
+// Text entry on the keyboard (shared with the WiFi password screen).
+void okLabel(const char* l);      // the keyboard's big key, e.g. "CONNECT" or "SAVE"
+void fieldHint(const char* h);    // grey text in an empty field
+void textEntry(lgfx::LovyanGFX& g, const char* title, const char* value, int layer);
 void resetHold(lgfx::LovyanGFX& g, int secondsLeft);
 void formatMiles(char* out, size_t n, float miles, int decimals);
 }
