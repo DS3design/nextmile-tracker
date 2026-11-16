@@ -1048,7 +1048,8 @@ void loop() {
     snap();
   }
   maybeSync();
-  extras::setSetup(shown != Screen::Main && shown != Screen::Together && shown != Screen::Info && shown != Screen::None);
+  extras::setSetup(shown != Screen::Main && shown != Screen::Together && shown != Screen::Night && shown != Screen::Info &&
+                   shown != Screen::None);
   extras::loop(netUp && !portalActive);
   updatePace();
   applyBacklight();
