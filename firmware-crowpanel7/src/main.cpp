@@ -445,6 +445,7 @@ void factoryReset() {
     src::unlink();
   }
   prefs.clear();
+  LittleFS.remove("/photo.jpg");
   wm.resetSettings();
   delay(500);
   ESP.restart();
