@@ -66,6 +66,7 @@ int main() {
     strcpy(b.athlete, "Jamie S.");
     b.ytd_m = 287.3f * 1609.344f; b.ytd_runs = 61; b.goal_mi = 412.0f; b.last_year_mi = 412.0f;
     strcpy(b.last.name, "Sunday Long Run"); b.last.meters = 16093; b.last.moving_s = 5520;
+    a.theme = 0; b.theme = 2;  // each runner picks their own colors
     ui::duo(s, a, b); save(s, "out7/duo.ppm");
     for (uint32_t ms = 1000; ms <= 3000; ms += 50) ui::confettiStep(s, ms);
     save(s, "out7/duo_confetti.ppm");
@@ -75,6 +76,8 @@ int main() {
     ui::together(s, a, b, 1000); save(s, "out7/together_shared.ppm");
     UiData an = a, bn = b; an.fc[0].valid = false;
     ui::together(s, an, bn); save(s, "out7/together_nofc.ppm");
+    UiData aa = a, ab = b; aa.totals_only = true;  // Apple runner: year-only race
+    ui::together(s, aa, ab); save(s, "out7/together_apple.ppm");
     UiData both[2] = {a, b};
     ui::night(s, both, 2, "10:42", "PM", "MONDAY, NOVEMBER 16"); save(s, "out7/night_duo.ppm");
     ui::night(s, both, 1, "6:05", "AM", "TUESDAY, NOVEMBER 17"); save(s, "out7/night.ppm");
@@ -131,7 +134,8 @@ int main() {
     };
     ui::settings(s, tabs, 6, 1, rr, 3, "Now link runner 2's watch: GOAL tab, Link a watch"); save(s, "out7/set_runners.ppm");
     ui::SetRow sc[] = {
-      {7, ui::ROW_CHOICE, "Colors", "EMBER"},
+      {7, ui::ROW_CHOICE, "Colors, Don", "EMBER"},
+      {7, ui::ROW_CHOICE, "Colors, Jamie", "OCEAN"},
       {8, ui::ROW_STEP, "Brightness", "100%"},
       {9, ui::ROW_TOGGLE, "Dim in a dark room", "", true},
       {10, ui::ROW_TOGGLE, "Night clock", "", true, "Dim clock instead of off"},

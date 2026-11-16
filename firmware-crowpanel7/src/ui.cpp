@@ -362,6 +362,7 @@ void forecast(lgfx::LovyanGFX& g, const UiData& d, int px, int py, int pw, int p
 
 // One runner in the area x0..x0+w: the full screen, or one half of the split screen.
 void runner(lgfx::LovyanGFX& g, const UiData& d, int x0, int w, const char* fallback, bool icon, const char* right) {
+  setTheme(d.theme);
   const bool half = w < W;
   const float miles = d.ytd_m / 1609.344f;
   char big[24];
@@ -396,12 +397,14 @@ void main(lgfx::LovyanGFX& g, const UiData& d) {
 }
 
 void duo(lgfx::LovyanGFX& g, const UiData& a, const UiData& b) {
+  const int saved = cur;
   bg(g);
   runner(g, a, 0, W / 2, "Runner 1", false, nullptr);
   runner(g, b, W / 2, W / 2, "Runner 2", false, nullptr);
   g.fillRect(W / 2 - 1, 20, 2, H - 40, c(g, TRACK));
   if (a.sync_error) g.fillCircle(8, H - 8, 5, c(g, RED));
   if (b.sync_error) g.fillCircle(W - 8, H - 8, 5, c(g, RED));
+  setTheme(saved);
 }
 
 void together(lgfx::LovyanGFX& g, const UiData& a, const UiData& b, float sharedGoal) {
@@ -455,11 +458,14 @@ void together(lgfx::LovyanGFX& g, const UiData& a, const UiData& b, float shared
   const bool fc = a.fc[0].valid;
   const int ry = fc ? 330 : 340, rh = fc ? 78 : 132;
   g.fillRoundRect(M, ry, W - 2 * M, rh, 12, c(g, PANEL));
+  const bool totalsOnly = a.totals_only || b.totals_only;
   const char* const P[3] = {"THIS WEEK", "THIS MONTH", "THIS YEAR"};
   const float va[3] = {a.week_m, a.month_m, a.ytd_m}, vb[3] = {b.week_m, b.month_m, b.ytd_m};
-  const int cw = (W - 2 * M) / 3;
-  for (int k = 0; k < 3; k++) {
-    const int cx = M + cw * k + cw / 2;
+  const int nCols = totalsOnly ? 1 : 3;
+  const int cw = (W - 2 * M) / nCols;
+  for (int kk = 0; kk < nCols; kk++) {
+    const int k = totalsOnly ? 2 : kk;  // totals only: just the year column
+    const int cx = M + cw * kk + cw / 2;
     text(g, &f_label, GREY, PANEL, top_center, P[k], cx, ry + (fc ? 4 : 24));
     const float d = (va[k] - vb[k]) / 1609.344f;
     char line[48], n[16];

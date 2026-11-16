@@ -13,7 +13,8 @@ struct Settings {
   float goalMi = 0;       // 0 = beat last year
   uint8_t bright = 200;
   uint8_t kinds = 1;      // what counts: 1 runs, 2 walks and hikes, 3 both
-  uint8_t theme = 0;      // ui colour theme index
+  uint8_t theme = 0;      // ui colour theme index (runner 1)
+  uint8_t theme2 = 0;     // ui colour theme index (runner 2)
   bool autoDim = true;    // dim with the light sensor, off in a dark room
   uint8_t led = 1;        // 0 off, 1 new runs + milestones, 2 also glow when ahead of goal pace
   String place;           // weather location as typed (ZIP or city)
@@ -47,6 +48,7 @@ void photoChanged();  // /photo.jpg was uploaded or removed
 UiData uiData();  // the runner the settings page is on
 UiData uiData(int runner);
 int runners();  // 1, or 2 in two-runner mode
+uint8_t& themeOf(int runner);
 String& nameOf(int runner);
 float& goalOf(int runner);
 uint8_t& kindsOf(int runner);

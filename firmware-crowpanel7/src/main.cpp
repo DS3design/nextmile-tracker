@@ -46,7 +46,7 @@ bool settingsOpen = false;
 enum SetTab { T_GOAL, T_RUN, T_SCR, T_LED, T_WX, T_SYS };
 const char* const SET_TABS[] = {"GOAL", "RUNNERS", "SCREEN", "LIGHTS", "WEATHER", "SYSTEM"};
 enum SetId {
-  S_PICK, S_NAME, S_GOAL, S_KINDS, S_LINK, S_DUO, S_SHARED, S_THEME, S_BRIGHT, S_ADIM, S_NIGHT, S_PHOTO,
+  S_PICK, S_NAME, S_GOAL, S_KINDS, S_LINK, S_DUO, S_SHARED, S_THEME, S_THEME2, S_BRIGHT, S_ADIM, S_NIGHT, S_PHOTO,
   S_LEDON, S_LEDFX, S_LEDN, S_PLACE, S_TZ, S_WIFI, S_OTA, S_SYNC, S_PHONE, S_ERASE
 };
 ui::SetRow setRows[9];
@@ -250,6 +250,7 @@ void loadSettings() {
   c.bright = prefs.getUChar("bright", 200);
   c.kinds = prefs.getUChar("kinds", prefs.getBool("walks", false) ? 3 : 1);
   c.theme = prefs.getUChar("theme", 0);
+  c.theme2 = prefs.getUChar("theme2", 0);
   c.autoDim = prefs.getBool("adim", true);
   c.led = prefs.getUChar("led", 1);
   c.place = prefs.getString("place", "");
@@ -718,9 +719,12 @@ void setApply(int id, int dir) {  // dir: -1 left/minus, +1 right/plus, 0 the ro
       break;
     case S_SHARED: c.sharedGoal = max(0.0f, c.sharedGoal + dir * 50); break;
     case S_THEME:
-      c.theme = (c.theme + dir + ui::themeCount()) % ui::themeCount();
-      ui::setTheme(c.theme);
+    case S_THEME2: {
+      uint8_t& t = app::themeOf(id == S_THEME2 ? 1 : (c.duo ? 0 : setRunner));
+      t = (uint8_t)((t + dir + ui::themeCount()) % ui::themeCount());
+      ui::setTheme(c.duo ? t : c.theme);
       break;
+    }
     case S_BRIGHT: c.bright = constrain((int)c.bright + dir * 13, 20, 255); break;
     case S_ADIM: c.autoDim = !c.autoDim; break;
     case S_NIGHT: c.nightClock = !c.nightClock; break;
@@ -782,7 +786,15 @@ void buildRows() {
       sRow(0, ui::ROW_LINE, "Tap the miles to see both runners together.");
       break;
     case T_SCR:
-      sRow(S_THEME, ui::ROW_CHOICE, "Colors", ui::themeName(c.theme));
+      if (c.duo) {
+        char lbl[44];
+        const char* n1 = app::nameOf(0).length() ? app::nameOf(0).c_str() : "runner 1";
+        const char* n2 = app::nameOf(1).length() ? app::nameOf(1).c_str() : "runner 2";
+        snprintf(lbl, sizeof lbl, "Colors, %s", n1);
+        sRow(S_THEME, ui::ROW_CHOICE, lbl, ui::themeName(app::themeOf(0)));
+        snprintf(lbl, sizeof lbl, "Colors, %s", n2);
+        sRow(S_THEME2, ui::ROW_CHOICE, lbl, ui::themeName(app::themeOf(1)));
+      } else sRow(S_THEME, ui::ROW_CHOICE, "Colors", ui::themeName(c.theme));
       { char v[12]; snprintf(v, sizeof v, "%d%%", c.bright * 100 / 255); sRow(S_BRIGHT, ui::ROW_STEP, "Brightness", v); }
       sRow(S_ADIM, ui::ROW_TOGGLE, "Dim in a dark room", "", c.autoDim);
       sRow(S_NIGHT, ui::ROW_TOGGLE, "Night clock", "", c.nightClock, "Dim clock instead of off");
@@ -1097,6 +1109,7 @@ void saveSettings() {
   prefs.putUChar("bright", cfg.bright);
   prefs.putUChar("kinds", cfg.kinds);
   prefs.putUChar("theme", cfg.theme);
+  prefs.putUChar("theme2", cfg.theme2);
   prefs.putBool("adim", cfg.autoDim);
   prefs.putUChar("led", cfg.led);
   prefs.putString("place", cfg.place);
@@ -1177,6 +1190,7 @@ uint32_t lastSyncAgoS() {
 }
 
 int runners() { return cfg.duo ? 2 : 1; }
+uint8_t& themeOf(int i) { return i ? cfg.theme2 : cfg.theme; }
 String& nameOf(int i) { return i ? cfg.name2 : cfg.name; }
 float& goalOf(int i) { return i ? cfg.goalMi2 : cfg.goalMi; }
 uint8_t& kindsOf(int i) { return i ? cfg.kinds2 : cfg.kinds; }
@@ -1239,6 +1253,8 @@ UiData uiData(int i) {
   d.wifi_ok = netUp;
   d.sync_error = R.lastResult != src::OK || R.needRelink;
   d.source = R.kind == src::GOOGLE ? "FITBIT" : R.kind == src::APPLE ? "APPLE" : R.kind == src::POLAR ? "POLAR" : R.kind == src::GARMIN ? "GARMIN" : "STRAVA";
+  d.theme = themeOf(i);
+  d.totals_only = R.kind == src::APPLE;
   return d;
 }
 

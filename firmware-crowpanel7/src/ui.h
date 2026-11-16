@@ -40,6 +40,8 @@ struct UiData {
   const char* wx_desc = "";
   DayFc fc[3];
   float today_m = 0, week_m = 0, month_m = 0;  // this runner's miles today, since Monday, this month
+  int theme = 0;            // this runner's colour theme
+  bool totals_only = false; // provider reports year totals only (Apple): no today/week/month
 };
 
 namespace ui {
