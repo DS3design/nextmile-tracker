@@ -306,19 +306,19 @@ void weatherText(char* wx, size_t n, const UiData& d) {
 }
 
 // Theme background, or the photo blended most of the way into it so the numbers stay readable.
-void bg(lgfx::LovyanGFX& g) {
-  if (!backdrop) return (void)g.fillScreen(c(g, BLACK));
+void bg(lgfx::LovyanGFX& g, int x0 = 0, int w = W) {
+  if (!backdrop) return (void)g.fillRect(x0, 0, w, H, c(g, BLACK));
   const float A = 0.32f;
   const int br = BLACK >> 16, bgc = (BLACK >> 8) & 0xFF, bb = BLACK & 0xFF;
   static uint16_t row[W];
   for (int y = 0; y < H; y++) {
-    const uint16_t* p = backdrop + y * W;
-    for (int x = 0; x < W; x++) {
+    const uint16_t* p = backdrop + y * W + x0;
+    for (int x = 0; x < w; x++) {
       const int r = ((p[x] >> 11) & 31) * 255 / 31, gr = ((p[x] >> 5) & 63) * 255 / 63, b = (p[x] & 31) * 255 / 31;
       const int R = br + (int)((r - br) * A), G = bgc + (int)((gr - bgc) * A), B = bb + (int)((b - bb) * A);
       row[x] = (R >> 3) << 11 | (G >> 2) << 5 | B >> 3;
     }
-    g.pushImage(0, y, W, 1, (const lgfx::rgb565_t*)row);
+    g.pushImage(x0, y, w, 1, (const lgfx::rgb565_t*)row);
   }
 }
 
@@ -398,7 +398,10 @@ void main(lgfx::LovyanGFX& g, const UiData& d) {
 
 void duo(lgfx::LovyanGFX& g, const UiData& a, const UiData& b) {
   const int saved = cur;
-  bg(g);
+  setTheme(a.theme);
+  bg(g, 0, W / 2);
+  setTheme(b.theme);
+  bg(g, W / 2, W / 2);
   runner(g, a, 0, W / 2, "Runner 1", false, nullptr);
   runner(g, b, W / 2, W / 2, "Runner 2", false, nullptr);
   g.fillRect(W / 2 - 1, 20, 2, H - 40, c(g, TRACK));
@@ -765,8 +768,8 @@ float frand(float a, float b) { return a + (b - a) * (rand() % 1000) / 1000.0f; 
 
 // ---- On-screen settings ------------------------------------------------------
 const int TAB_X = M, TAB_W = 150, TAB_Y0 = 96, TAB_H = 52, TAB_GAP = 8;
-const int SROW_X = 200, SROW_W = W - SROW_X - M, SROW_Y0 = 100, SROW_H = 72, SROW_GAP = 8;
-const int CTL_Y = SROW_H / 2 - 26, CTL_W = 52, CTL_H = 52, VAL_W = 108;
+const int SROW_X = 200, SROW_W = W - SROW_X - M, SROW_Y0 = 92, SROW_H = 58, SROW_GAP = 6;
+const int CTL_Y = SROW_H / 2 - 22, CTL_W = 52, CTL_H = 44, VAL_W = 108;
 const int CTL_X = SROW_X + SROW_W - (2 * CTL_W + VAL_W) - 16;
 
 void sTab(lgfx::LovyanGFX& g, int i, const char* name, bool on) {
@@ -808,12 +811,12 @@ void sRowDraw(lgfx::LovyanGFX& g, int i, const SetRow& r) {
   }
   if (*r.hint) {
     fit(g, &f_label, lbl, SROW_W - 200);
-    text(g, &f_label, WHITE, pbg, middle_left, lbl, SROW_X + 16, y + SROW_H / 2 - 14);
+    text(g, &f_label, WHITE, pbg, middle_left, lbl, SROW_X + 16, y + SROW_H / 2 - 11);
     char h[70];
     strncpy(h, r.hint, sizeof h - 1);
     h[sizeof h - 1] = 0;
     fit(g, &f_body, h, SROW_W - 200);
-    text(g, &f_body, DIM, pbg, middle_left, h, SROW_X + 16, y + SROW_H / 2 + 18);
+    text(g, &f_body, DIM, pbg, middle_left, h, SROW_X + 16, y + SROW_H / 2 + 14);
   } else {
     fit(g, &f_label, lbl, SROW_W - 200);
     text(g, &f_label, WHITE, pbg, middle_left, lbl, SROW_X + 16, y + SROW_H / 2);

@@ -52,6 +52,7 @@ enum SetId {
 ui::SetRow setRows[9];
 int setIds[9], setCount = 0, setTab = 0, setRunner = 0;
 char setVals[9][44];
+char setLbls[9][48];
 bool setEraseArm = false;
 char setStatusBuf[60] = "";
 
@@ -642,10 +643,13 @@ void sRow(int id, ui::RowKind k, const char* label, const char* val = "", bool o
   char* v = setVals[setN];
   strncpy(v, val, sizeof setVals[0] - 1);
   v[sizeof setVals[0] - 1] = 0;
+  char* l = setLbls[setN];
+  strncpy(l, label, sizeof setLbls[0] - 1);
+  l[sizeof setLbls[0] - 1] = 0;
   ui::SetRow& r = setRows[setN];
   r.id = id;
   r.kind = k;
-  r.label = label;
+  r.label = l;
   r.value = v;
   r.on = on;
   r.hint = hint;
