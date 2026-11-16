@@ -11,7 +11,7 @@ for src in $L/lgfx/v1/*.cpp $L/lgfx/v1/misc/*.cpp $L/lgfx/v1/panel/Panel_Device.
 done
 wait
 mkdir -p out7
-g++ $F sim7_main.cpp ../firmware-crowpanel7/src/ui.cpp build/obj/*.o -o build/sim7 $(sdl2-config --libs) -lpthread
+g++ $F sim7_main.cpp ../firmware-crowpanel7/src/ui.cpp ../firmware-crowpanel7/src/ledfx.cpp build/obj/*.o -o build/sim7 $(sdl2-config --libs) -lpthread
 ./build/sim7
 for f in out7/*.ppm; do python3 -c "from PIL import Image;import sys;Image.open(sys.argv[1]).save(sys.argv[1][:-4]+'.png')" $f; rm $f; done
 ls out7

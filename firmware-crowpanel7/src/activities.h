@@ -32,6 +32,8 @@ void begin();
 void use(int slot);
 int current();
 const Totals& totals();
+// Meters of cached activities that started at or after `localFrom` (local wall-clock seconds).
+float since(int32_t localFrom);
 void clear();
 
 // Full re-read of `year`: replaces everything cached.

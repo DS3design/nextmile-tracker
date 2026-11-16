@@ -15,7 +15,7 @@ FONTS_CYD = [
 ]
 
 FONTS_7 = [
-    ('font_big',   'Oswald.ttf', {'wght': 600}, 170, ' 0123456789,.-'),
+    ('font_big',   'Oswald.ttf', {'wght': 600}, 170, ' 0123456789,.-:'),
     ('font_half',  'Oswald.ttf', {'wght': 600}, 120, ' 0123456789,.-'),
     ('font_title', 'Oswald.ttf', {'wght': 600}, 46, ASCII),
     ('font_mid',   'Oswald.ttf', {'wght': 500}, 34, ASCII),

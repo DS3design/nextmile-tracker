@@ -41,6 +41,7 @@ int cur = 0;
 lgfx::PointerWrapper w_big, w_half, w_title, w_mid, w_label, w_body;
 lgfx::VLWfont f_big, f_half, f_title, f_mid, f_label, f_body;
 bool fontsReady = false;
+const uint16_t* backdrop = nullptr;
 
 void load(lgfx::VLWfont& f, lgfx::PointerWrapper& w, const uint8_t* data, size_t len) {
   w.set(data, len);
@@ -241,7 +242,7 @@ void goalLine(lgfx::LovyanGFX& g, const UiData& d, int x, int y, int w, int bh) 
 
 // Latest run. Wide: one row of distance, pace and time. Narrow (half screen): distance and pace, then time and date.
 void lastPanel(lgfx::LovyanGFX& g, const UiData& d, int px, int py, int pw, int ph) {
-  const bool narrow = pw < 500;
+  const bool narrow = ph >= 110;
   g.fillRoundRect(px, py, pw, ph, 12, c(g, PANEL));
   g.setClipRect(px, py, pw, ph);
   char ln[64];
@@ -301,6 +302,61 @@ void weatherText(char* wx, size_t n, const UiData& d) {
   else snprintf(wx, n, "%d\u00b0  %s", d.wx_temp, d.wx_desc);
 }
 
+// Theme background, or the photo blended most of the way into it so the numbers stay readable.
+void bg(lgfx::LovyanGFX& g) {
+  if (!backdrop) return (void)g.fillScreen(c(g, BLACK));
+  const float A = 0.32f;
+  const int br = BLACK >> 16, bgc = (BLACK >> 8) & 0xFF, bb = BLACK & 0xFF;
+  static uint16_t row[W];
+  for (int y = 0; y < H; y++) {
+    const uint16_t* p = backdrop + y * W;
+    for (int x = 0; x < W; x++) {
+      const int r = ((p[x] >> 11) & 31) * 255 / 31, gr = ((p[x] >> 5) & 63) * 255 / 63, b = (p[x] & 31) * 255 / 31;
+      const int R = br + (int)((r - br) * A), G = bgc + (int)((gr - bgc) * A), B = bb + (int)((b - bb) * A);
+      row[x] = (R >> 3) << 11 | (G >> 2) << 5 | B >> 3;
+    }
+    g.pushImage(0, y, W, 1, (const lgfx::rgb565_t*)row);
+  }
+}
+
+void drop(lgfx::LovyanGFX& g, int x, int y, uint32_t col) {  // raindrop, centred on x, y
+  g.fillCircle(x, y + 3, 6, c(g, col));
+  g.fillTriangle(x - 6, y + 2, x + 6, y + 2, x, y - 9, c(g, col));
+}
+
+// Three-day running forecast. Tall: day, high/low and rain chance stacked. Flat: one line per day.
+void forecast(lgfx::LovyanGFX& g, const UiData& d, int px, int py, int pw, int ph) {
+  g.fillRoundRect(px, py, pw, ph, 12, c(g, PANEL));
+  const bool flat = ph < 80;
+  const int cw = pw / 3;
+  for (int i = 0; i < 3; i++) {
+    const DayFc& f = d.fc[i];
+    if (!f.valid) continue;
+    const int cx = px + cw * i + cw / 2;
+    char t[16], r[8];
+    snprintf(t, sizeof t, "%d/%d\u00b0", f.hi, f.lo);
+    snprintf(r, sizeof r, "%d%%", f.rain);
+    const uint32_t rc = f.rain >= 30 ? RED : GREY;
+    if (flat) {
+      char line[40];
+      snprintf(line, sizeof line, "%s  %s", f.name, t);
+      g.setFont(&f_label);
+      const int lw = g.textWidth(line), rw = g.textWidth(r), tw = lw + 18 + 16 + rw;
+      const int x = cx - tw / 2, y = py + ph / 2;
+      text(g, &f_label, WHITE, PANEL, middle_left, line, x, y);
+      drop(g, x + lw + 18 + 6, y, rc);
+      text(g, &f_label, rc, PANEL, middle_left, r, x + lw + 34, y);
+      continue;
+    }
+    text(g, &f_label, GREY, PANEL, top_center, f.name, cx, py + 6);
+    text(g, &f_label, WHITE, PANEL, top_center, t, cx, py + 32);
+    g.setFont(&f_label);
+    const int rw = g.textWidth(r);
+    drop(g, cx - rw / 2 - 6, py + 72, rc);
+    text(g, &f_label, rc, PANEL, middle_left, r, cx - rw / 2 + 6, py + 72);
+  }
+}
+
 // One runner in the area x0..x0+w: the full screen, or one half of the split screen.
 void runner(lgfx::LovyanGFX& g, const UiData& d, int x0, int w, const char* fallback, bool icon, const char* right) {
   const bool half = w < W;
@@ -314,14 +370,22 @@ void runner(lgfx::LovyanGFX& g, const UiData& d, int x0, int w, const char* fall
   snprintf(lbl, sizeof lbl, "MILES IN %d  -  %u %s", d.year, d.ytd_runs, noun(d.kinds, d.ytd_runs != 1));
   text(g, &f_label, GREY, BLACK, top_center, lbl, x0 + w / 2, half ? 214 : 252);
   goalLine(g, d, x0 + M, half ? 262 : 296, w - 2 * M, half ? 22 : 28);
-  if (half) lastPanel(g, d, x0 + M, 352, w - 2 * M, 120);
-  else lastPanel(g, d, x0 + M, 384, w - 2 * M, 88);
+  if (half) {
+    lastPanel(g, d, x0 + M, 352, w - 2 * M, 120);
+  } else if (d.fc[0].valid) {
+    lastPanel(g, d, x0 + M, 384, 424, 88);
+    forecast(g, d, x0 + M + 440, 384, w - 2 * M - 440, 88);
+  } else {
+    lastPanel(g, d, x0 + M, 384, w - 2 * M, 88);
+  }
 }
 
 }  // namespace
 
+void setBackdrop(const uint16_t* px) { backdrop = px; }
+
 void main(lgfx::LovyanGFX& g, const UiData& d) {
-  g.fillScreen(c(g, BLACK));
+  bg(g);
   char wx[40];
   weatherText(wx, sizeof wx, d);
   runner(g, d, 0, W, "Next Mile Tracker", true, wx);
@@ -329,7 +393,7 @@ void main(lgfx::LovyanGFX& g, const UiData& d) {
 }
 
 void duo(lgfx::LovyanGFX& g, const UiData& a, const UiData& b) {
-  g.fillScreen(c(g, BLACK));
+  bg(g);
   runner(g, a, 0, W / 2, "Runner 1", false, nullptr);
   runner(g, b, W / 2, W / 2, "Runner 2", false, nullptr);
   g.fillRect(W / 2 - 1, 20, 2, H - 40, c(g, TRACK));
@@ -337,22 +401,22 @@ void duo(lgfx::LovyanGFX& g, const UiData& a, const UiData& b) {
   if (b.sync_error) g.fillCircle(W - 8, H - 8, 5, c(g, RED));
 }
 
-void together(lgfx::LovyanGFX& g, const UiData& a, const UiData& b) {
-  g.fillScreen(c(g, BLACK));
+void together(lgfx::LovyanGFX& g, const UiData& a, const UiData& b, float sharedGoal) {
+  bg(g);
   const float ma = a.ytd_m / 1609.344f, mb = b.ytd_m / 1609.344f, sum = ma + mb;
   char big[24];
   formatMiles(big, sizeof big, sum, 1);
-  text(g, &f_big, WHITE, BLACK, top_center, big, W / 2, 34);
+  text(g, &f_half, WHITE, BLACK, top_center, big, W / 2, 56);
   char wx[40];
   weatherText(wx, sizeof wx, a);
   header(g, "Together", a.wifi_ok && b.wifi_ok, wx);
   char lbl[64];
   snprintf(lbl, sizeof lbl, "MILES TOGETHER IN %d  -  %u %s", a.year, a.ytd_runs + b.ytd_runs,
            a.kinds == b.kinds ? noun(a.kinds, true) : "ACTIVITIES");
-  text(g, &f_label, GREY, BLACK, top_center, lbl, W / 2, 252);
-  // One bar split into each person's share, against both goals added up.
-  const float goal = a.goal_mi + b.goal_mi;
-  const int bx = M, by = 344, bw = W - 2 * M, bh = 28;
+  text(g, &f_label, GREY, BLACK, top_center, lbl, W / 2, 206);
+  // One bar split into each person's share, against the shared goal (or both goals added up).
+  const float goal = sharedGoal > 0 ? sharedGoal : a.goal_mi + b.goal_mi;
+  const int bx = M, by = 272, bw = W - 2 * M, bh = 24;
   g.fillRoundRect(bx, by, bw, bh, bh / 2, c(g, TRACK));
   const float scale = goal > 0 ? (sum > goal ? sum : goal) : (sum > 0 ? sum : 1);
   const int wa = (int)(bw * ma / scale), wb = (int)(bw * mb / scale);
@@ -360,28 +424,92 @@ void together(lgfx::LovyanGFX& g, const UiData& a, const UiData& b) {
   if (wa > 0) g.fillRoundRect(bx, by, std::max(bh, wa), bh, bh / 2, c(g, RED));
   char t[64], gm[20];
   if (goal > 0) {
-    formatMiles(gm, sizeof gm, goal, 1);
-    snprintf(t, sizeof t, sum >= goal ? "BOTH GOALS ADDED UP: %s MI  -  BEATEN!" : "BOTH GOALS ADDED UP: %s MI", gm);
-    text(g, &f_label, WHITE, BLACK, top_left, t, bx, 304);
+    formatMiles(gm, sizeof gm, goal, sharedGoal > 0 ? 0 : 1);
+    const char* what = sharedGoal > 0 ? "SHARED GOAL" : "BOTH GOALS ADDED UP";
+    snprintf(t, sizeof t, sum >= goal ? "%s: %s MI  -  DONE!" : "%s: %s MI", what, gm);
+    text(g, &f_label, WHITE, BLACK, top_left, t, bx, 240);
     snprintf(t, sizeof t, "%d%%", (int)(sum / goal * 100 + 0.5f));
-    text(g, &f_label, sum >= goal ? RED : WHITE, BLACK, top_right, t, bx + bw, 304);
+    text(g, &f_label, sum >= goal ? RED : WHITE, BLACK, top_right, t, bx + bw, 240);
   }
-  // Who did what, under the bar, in the bar's colours.
+  // Legend in the bar's colours: who did what.
   const UiData* who[2] = {&a, &b};
-  const float mi[2] = {ma, mb};
+  char nm[2][40], first[2][24];
   for (int i = 0; i < 2; i++) {
-    const int px = i ? W / 2 + 10 : M, pw = W / 2 - M - 10;
-    g.fillRoundRect(px, 392, pw, 80, 12, c(g, PANEL));
-    g.fillRoundRect(px + 20, 420, 24, 24, 6, c(g, i ? GREY : RED));
-    char nm[40], num[24];
-    upper(nm, sizeof nm, who[i]->athlete[0] ? who[i]->athlete : i ? "Runner 2" : "Runner 1");
-    formatMiles(num, sizeof num, mi[i], 1);
-    strcat(num, " MI");
+    upper(nm[i], sizeof nm[i], who[i]->athlete[0] ? who[i]->athlete : i ? "Runner 2" : "Runner 1");
+    strncpy(first[i], nm[i], sizeof first[i] - 1);
+    first[i][sizeof first[i] - 1] = 0;
+    char* sp = strchr(first[i], ' ');
+    if (sp && sp != first[i]) *sp = 0;
+    char num[24], item[64];
+    formatMiles(num, sizeof num, (i ? mb : ma), 1);
+    snprintf(item, sizeof item, "%s  %s MI", nm[i], num);
+    fit(g, &f_label, item, W / 2 - M - 40);
+    const int x0 = i ? W / 2 + 10 : M;
+    g.fillRoundRect(x0, 304, 18, 18, 4, c(g, i ? GREY : RED));
+    text(g, &f_label, WHITE, BLACK, middle_left, item, x0 + 28, 313);
+  }
+  // Race: who's ahead this week, this month and this year.
+  const bool fc = a.fc[0].valid;
+  const int ry = fc ? 334 : 340, rh = fc ? 70 : 132;
+  g.fillRoundRect(M, ry, W - 2 * M, rh, 12, c(g, PANEL));
+  const char* const P[3] = {"THIS WEEK", "THIS MONTH", "THIS YEAR"};
+  const float va[3] = {a.week_m, a.month_m, a.ytd_m}, vb[3] = {b.week_m, b.month_m, b.ytd_m};
+  const int cw = (W - 2 * M) / 3;
+  for (int k = 0; k < 3; k++) {
+    const int cx = M + cw * k + cw / 2;
+    text(g, &f_label, GREY, PANEL, top_center, P[k], cx, ry + (fc ? 8 : 24));
+    const float d = (va[k] - vb[k]) / 1609.344f;
+    char line[48], n[16];
+    int lead = d > 0 ? 0 : 1;
+    if (va[k] <= 0 && vb[k] <= 0) snprintf(line, sizeof line, "-");
+    else if (fabsf(d) < 0.05f) snprintf(line, sizeof line, "TIED");
+    else {
+      formatMiles(n, sizeof n, fabsf(d), 1);
+      snprintf(line, sizeof line, "%s +%s", first[lead], n);
+    }
+    fit(g, &f_mid, line, cw - 50);
+    const int ly = ry + (fc ? 50 : 86);
+    const bool sq = line[0] != '-' && strcmp(line, "TIED") != 0;
     g.setFont(&f_mid);
-    const int nw = g.textWidth(num);
-    fit(g, &f_mid, nm, pw - 84 - nw - 20);
-    text(g, &f_mid, WHITE, PANEL, middle_left, nm, px + 60, 432);
-    text(g, &f_mid, WHITE, PANEL, middle_right, num, px + pw - 20, 432);
+    const int lw = g.textWidth(line) + (sq ? 26 : 0);
+    if (sq) g.fillRoundRect(cx - lw / 2, ly - 8, 16, 16, 4, c(g, lead ? GREY : RED));
+    text(g, &f_mid, WHITE, PANEL, middle_left, line, cx - lw / 2 + (sq ? 26 : 0), ly);
+  }
+  if (fc) forecast(g, a, M, 412, W - 2 * M, 60);
+  if (a.sync_error) g.fillCircle(8, H - 8, 5, c(g, RED));
+  if (b.sync_error) g.fillCircle(W - 8, H - 8, 5, c(g, RED));
+}
+
+void night(lgfx::LovyanGFX& g, const UiData* r, int n, const char* hhmm, const char* ampm, const char* date) {
+  // Always dark, whatever the theme, so it doesn't light up the room.
+  const uint32_t K = 0x000000, T = 0x8A8A8A, S = 0x505050;
+  g.fillScreen(c(g, K));
+  g.setFont(&f_big);
+  const int tw = g.textWidth(hhmm);
+  g.setFont(&f_title);
+  const int aw = g.textWidth(ampm);
+  const int x = W / 2 - (tw + 14 + aw) / 2;
+  text(g, &f_big, T, K, top_left, hhmm, x, 40);
+  text(g, &f_title, S, K, top_left, ampm, x + tw + 14, 70);
+  text(g, &f_label, S, K, top_center, date, W / 2, 262);
+  char line[96], a[16], b[16];
+  if (n < 2) {
+    formatMiles(a, sizeof a, r[0].today_m / 1609.344f, 1);
+    snprintf(line, sizeof line, "%s MI TODAY", a);
+  } else {
+    char na[24], nb[24];
+    upper(na, sizeof na, r[0].athlete[0] ? r[0].athlete : "Runner 1");
+    upper(nb, sizeof nb, r[1].athlete[0] ? r[1].athlete : "Runner 2");
+    formatMiles(a, sizeof a, r[0].today_m / 1609.344f, 1);
+    formatMiles(b, sizeof b, r[1].today_m / 1609.344f, 1);
+    snprintf(line, sizeof line, "%s %s  -  %s %s MI TODAY", na, a, nb, b);
+  }
+  fit(g, &f_title, line, W - 2 * M);
+  text(g, &f_title, T, K, top_center, line, W / 2, 318);
+  const DayFc& f = r[0].fc[1];
+  if (f.valid) {
+    snprintf(line, sizeof line, "TOMORROW  %d/%d\u00b0  %d%% RAIN  %s", f.hi, f.lo, f.rain, f.desc);
+    text(g, &f_label, S, K, top_center, line, W / 2, 410);
   }
 }
 

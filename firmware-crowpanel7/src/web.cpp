@@ -1,5 +1,9 @@
 #include "web.h"
 
+#include <LittleFS.h>
+
+#include "ledfx.h"
+
 #include <WebServer.h>
 #include <WiFi.h>
 
@@ -149,6 +153,12 @@ void handleRoot() {
   if (app::cfg.duo) b += F(" checked");
   b += F("> Two runners, side by side</label><div class=dim>A second person links their own watch and gets their own "
          "goal. Tap the tracker's screen to see your miles added up.</div>");
+  if (app::cfg.duo) {
+    b += F("<label>Shared goal for the two of you (miles this year)</label><input type=number name=shared min=0 max=20000 "
+           "step=1 inputmode=numeric placeholder='Both goals added up' value='");
+    if (app::cfg.sharedGoal > 0) b += String((int)app::cfg.sharedGoal);
+    b += F("'>");
+  }
   b += F("<label>Colors</label><select name=theme>");
   for (int i = 0; i < ui::themeCount(); i++)
     b += "<option value=" + String(i) + (i == app::cfg.theme ? " selected>" : ">") + ui::themeName(i) + "</option>";
@@ -171,9 +181,34 @@ void handleRoot() {
   else if (app::cfg.placeName.length()) b += "<div class=dim>Showing weather for " + esc(app::cfg.placeName) + "</div>";
   b += F("<label class=row><input type=checkbox name=adim value=1");
   if (app::cfg.autoDim) b += F(" checked");
-  b += F("> Dim the screen in a dark room</label><label class=row><input type=checkbox name=ledon value=1");
+  b += F("> Dim the screen in a dark room</label><label class=row><input type=checkbox name=nightclk value=1");
+  if (app::cfg.nightClock) b += F(" checked");
+  b += F("> At night, show a dim clock instead of turning the screen off</label>"
+         "<label class=row><input type=checkbox name=ledon value=1");
   if (app::cfg.led == 2) b += F(" checked");
-  b += F("> Keep the light on the back on all the time</label><div class=dim>Otherwise it glows for 6 hours after new miles and flashes on milestones. It uses your color theme.</div><button>Save</button></form>");
+  b += F("> Keep the lights on the back on all the time</label><div class=dim>Otherwise they light up for 6 hours after new "
+         "miles, starting with fireworks, and put on a show for milestones. They use your color theme.</div>"
+         "<label>Light effect after new miles</label><select name=ledfx>");
+  for (int i = 0; i < ledfx::EFFECT_N; i++)
+    b += "<option value=" + String(i) + (i == app::cfg.ledFx ? " selected>" : ">") + ledfx::name(i) + "</option>";
+  b += F("</select><label>Number of lights on the strip</label><input type=number name=ledn min=1 max=60 step=1 "
+         "inputmode=numeric value=");
+  b += String(app::cfg.ledCount);
+  b += F("><button>Save</button></form>");
+
+  b += F("<h2>Photo</h2><div class=dim>Pick a photo and it shows faintly behind the miles.</div>"
+         "<input type=file id=ph accept='image/*'><div id=pst class=dim></div>");
+  if (LittleFS.exists("/photo.jpg"))
+    b += F("<form method=post action=/photo/remove><button class=ghost>Remove the photo</button></form>");
+  // The phone shrinks the photo to the screen's 800x480 before sending it.
+  b += F("<script>document.getElementById('ph').onchange=function(e){var f=e.target.files[0];if(!f)return;"
+         "var s=document.getElementById('pst');s.textContent='Sending...';var i=new Image();i.onload=function(){"
+         "var c=document.createElement('canvas');c.width=800;c.height=480;var k=Math.max(800/i.width,480/i.height),"
+         "w=i.width*k,h=i.height*k;c.getContext('2d').drawImage(i,(800-w)/2,(480-h)/2,w,h);c.toBlob(function(bl){"
+         "var d=new FormData();d.append('p',bl,'photo.jpg');fetch('/photo',{method:'POST',body:d}).then(function(r){"
+         "if(r.ok)location.reload();else s.textContent='That didn\\'t work. Try again.'}).catch(function(){"
+         "s.textContent='That didn\\'t work. Try again.'})},'image/jpeg',0.85)};i.onerror=function(){"
+         "s.textContent='That photo couldn\\'t be opened. Try another one.'};i.src=URL.createObjectURL(f)};</script>");
 
   b += F("<h2>More</h2><form method=post action=/sync>");
   b += rIn(r);
@@ -234,6 +269,10 @@ void handleSave() {
   }
   c.autoDim = server.hasArg("adim");
   c.led = server.hasArg("ledon") ? 2 : 1;
+  c.nightClock = server.hasArg("nightclk");
+  if (server.hasArg("ledfx")) c.ledFx = constrain(server.arg("ledfx").toInt(), 0, ledfx::EFFECT_N - 1);
+  if (server.hasArg("ledn")) c.ledCount = constrain(server.arg("ledn").toInt(), 1, ledfx::MAX_LEDS);
+  if (server.hasArg("shared")) c.sharedGoal = max(0.0f, server.arg("shared").toFloat());
   const bool duoOn = server.hasArg("duo") && !c.duo;
   c.duo = server.hasArg("duo");
   app::saveSettings();
@@ -405,6 +444,27 @@ void handleExchange() {
                                        ". Check the tracker's WiFi and try again.</p><a class=btn href='/link" + rq(linkRunner) + "'>Try again</a>");
 }
 
+File upFile;
+void handlePhotoUpload() {
+  HTTPUpload& u = server.upload();
+  if (u.status == UPLOAD_FILE_START) upFile = LittleFS.open("/photo.tmp", "w");
+  else if (u.status == UPLOAD_FILE_WRITE && upFile) upFile.write(u.buf, u.currentSize);
+  else if (u.status == UPLOAD_FILE_END && upFile) upFile.close();
+  else if (u.status == UPLOAD_FILE_ABORTED && upFile) upFile.close(), LittleFS.remove("/photo.tmp");
+}
+void handlePhoto() {
+  if (!LittleFS.exists("/photo.tmp")) return server.send(400, "text/plain", "No photo");
+  LittleFS.remove("/photo.jpg");
+  LittleFS.rename("/photo.tmp", "/photo.jpg");
+  app::photoChanged();
+  server.send(200, "text/plain", "ok");
+}
+void handlePhotoRemove() {
+  LittleFS.remove("/photo.jpg");
+  app::photoChanged();
+  redirect("/");
+}
+
 void handleSync() {
   const int r = pick();
   app::requestSync(true);
@@ -447,6 +507,8 @@ void begin() {
   server.on("/apple", HTTP_GET, handleApple);
   server.on("/api/apple", HTTP_POST, handleApplePush);
   server.on("/sync", HTTP_POST, handleSync);
+  server.on("/photo", HTTP_POST, handlePhoto, handlePhotoUpload);
+  server.on("/photo/remove", HTTP_POST, handlePhotoRemove);
   server.on("/wifi", HTTP_POST, handleWifi);
   server.on("/update", HTTP_POST, handleUpdate);
   server.on("/reset", HTTP_POST, handleReset);

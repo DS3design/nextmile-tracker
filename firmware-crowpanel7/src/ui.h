@@ -14,6 +14,13 @@ struct RunInfo {
   int32_t start_local = 0;  // seconds since epoch in the runner's local time
 };
 
+struct DayFc {  // one day of the running forecast
+  bool valid = false;
+  int hi = 0, lo = 0, rain = 0;  // F, max rain chance %
+  const char* desc = "";
+  char name[8] = "";  // "TODAY", "TUE"
+};
+
 struct UiData {
   char athlete[40] = "";
   int year = 2026;
@@ -31,6 +38,8 @@ struct UiData {
   bool wx_valid = false;
   int wx_temp = 0, wx_rain = 0;  // F, today's max rain chance %
   const char* wx_desc = "";
+  DayFc fc[3];
+  float today_m = 0, week_m = 0, month_m = 0;  // this runner's miles today, since Monday, this month
 };
 
 namespace ui {
@@ -43,7 +52,12 @@ void init();
 void main(lgfx::LovyanGFX& g, const UiData& d);
 // Two-runner mode: split down the middle, and a tap shows the pair's combined miles.
 void duo(lgfx::LovyanGFX& g, const UiData& a, const UiData& b);
-void together(lgfx::LovyanGFX& g, const UiData& a, const UiData& b);
+// sharedGoal: miles the pair aim for together; 0 = both goals added up.
+void together(lgfx::LovyanGFX& g, const UiData& a, const UiData& b, float sharedGoal = 0);
+// Dark room: a big dim clock and today's miles for each of the n runners.
+void night(lgfx::LovyanGFX& g, const UiData* r, int n, const char* hhmm, const char* ampm, const char* date);
+// A photo (800x480 RGB565) drawn faintly behind the miles screens; nullptr for none.
+void setBackdrop(const uint16_t* rgb565);
 // A few confetti flakes drifting down over the main screen; each flake saves and restores what's under it.
 void confettiStep(lgfx::LovyanGFX& g, uint32_t ms);
 void confettiClear(lgfx::LovyanGFX& g);  // put back what the flakes covered

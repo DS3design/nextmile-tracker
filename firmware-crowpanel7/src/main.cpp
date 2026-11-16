@@ -12,6 +12,9 @@
 
 #include "app.h"
 #include "board.h"
+#include "clockchip.h"
+#include "ledfx.h"
+#include <esp_sntp.h>
 #include "activities.h"
 #include "extras.h"
 #include "net.h"
@@ -22,7 +25,7 @@
 
 namespace {
 
-enum class Screen { None, WifiList, WifiPass, WifiPhone, Joining, Connecting, Clock, WifiRetry, Link, Main, Together, Info, NotConfigured };
+enum class Screen { None, WifiList, WifiPass, WifiPhone, Joining, Connecting, Clock, WifiRetry, Link, Main, Together, Night, Info, NotConfigured };
 
 const uint32_t RECENT_EVERY_MS = 30UL * 60 * 1000;
 const uint32_t FULL_EVERY_MS = 24UL * 60 * 60 * 1000;
@@ -65,6 +68,8 @@ struct Runner {
   src::Kind kind = src::NONE;
   String athlete;
   acts::Totals tot;
+  float todayM = 0, weekM = 0, monthM = 0;
+  int32_t statDay = 0;  // local day number those were counted on
 };
 Runner run[2];
 bool together = false;  // two-runner mode: showing the combined miles
@@ -75,9 +80,27 @@ const char* key(const char* k, int i) {  // per-runner prefs key: runner 2 gets 
   return b;
 }
 
+// Local wall-clock seconds (what activity start times are stored in).
+int32_t localNow() {
+  time_t t = time(nullptr);
+  tm l;
+  localtime_r(&t, &l);
+  return acts::daysFromCivil(l.tm_year + 1900, l.tm_mon + 1, l.tm_mday) * 86400 + l.tm_hour * 3600 + l.tm_min * 60 + l.tm_sec;
+}
+
 // Copy what's loaded for the current runner, so both can be drawn without switching.
 void snap() {
   Runner& r = run[src::current()];
+  if (time(nullptr) > 1700000000) {
+    const int32_t day = localNow() / 86400;
+    time_t t = time(nullptr);
+    tm l;
+    localtime_r(&t, &l);
+    r.todayM = acts::since(day * 86400);
+    r.weekM = acts::since((day - (day + 3) % 7) * 86400);  // since Monday; day 0 was a Thursday
+    r.monthM = acts::since(acts::daysFromCivil(l.tm_year + 1900, l.tm_mon + 1, 1) * 86400);
+    r.statDay = day;
+  }
   r.tot = acts::totals();
   r.linked = src::linked();
   r.kind = src::kind();
@@ -214,6 +237,10 @@ void loadSettings() {
   c.name2 = prefs.getString("name1", "");
   c.goalMi2 = prefs.getFloat("goal1", 0);
   c.kinds2 = prefs.getUChar("kinds1", 1);
+  c.sharedGoal = prefs.getFloat("shared", 0);
+  c.nightClock = prefs.getBool("nightclk", true);
+  c.ledFx = prefs.getUChar("ledfx", ledfx::MIX);
+  c.ledCount = prefs.getUChar("ledn", 10);
   ui::setTheme(c.theme);
 }
 
@@ -423,10 +450,38 @@ void factoryReset() {
   ESP.restart();
 }
 
+// Photo behind the miles: /photo.jpg (800x480, sized by the phone page) decoded once into PSRAM.
+uint16_t* photo = nullptr;
+int photoDraw(JPEGDRAW* p) {
+  for (int y = 0; y < p->iHeight && p->y + y < 480; y++)
+    for (int x = 0; x < p->iWidth && p->x + x < 800; x++) photo[(p->y + y) * 800 + p->x + x] = p->pPixels[y * p->iWidth + x];
+  return 1;
+}
+void loadPhoto() {
+  ui::setBackdrop(nullptr);
+  File f = LittleFS.open("/photo.jpg", "r");
+  if (!f) return;
+  const size_t n = f.size();
+  uint8_t* buf = (uint8_t*)ps_malloc(n);
+  if (!photo) photo = (uint16_t*)ps_malloc(800 * 480 * 2);
+  bool ok = buf && photo && f.read(buf, n) == n && jpeg.openRAM(buf, n, photoDraw);
+  if (ok) {
+    memset(photo, 0, 800 * 480 * 2);
+    jpeg.setPixelType(RGB565_LITTLE_ENDIAN);
+    ok = jpeg.decode(0, 0, 0);
+    jpeg.close();
+  }
+  Serial.printf("photo %s\n", ok ? "loaded" : "failed");
+  if (ok) ui::setBackdrop(photo);
+  free(buf);
+  f.close();
+}
+
 void onNetUp() {
   netUp = true;
   wifiSaved = true;
   everConnected = true;
+  sntp_set_time_sync_notification_cb([](timeval*) { clockchip::save(); });  // keep the clock chip right
   configTzTime(app::cfg.tz.c_str(), "pool.ntp.org", "time.google.com", "time.nist.gov");
   MDNS.begin("nextmile");
   MDNS.addService("http", "tcp", 80);
@@ -580,6 +635,7 @@ Screen baseScreen() {
   if (portalActive)
     return setupView == SetupView::Pass ? Screen::WifiPass : setupView == SetupView::Phone ? Screen::WifiPhone : Screen::WifiList;
   bool showData = anyData();
+  if (showData && extras::night() && timeValid()) return Screen::Night;
   if (showData && overlayInfo && netUp) return Screen::Info;
   if (showData) return together && duoShown() ? Screen::Together : Screen::Main;
   if (!netUp) return (everConnected || millis() - bootMs > 30000) ? Screen::WifiRetry : Screen::Connecting;
@@ -596,7 +652,19 @@ void draw(Screen s) {
       if (duoShown()) ui::duo(lcd, app::uiData(0), app::uiData(1));
       else ui::main(lcd, app::uiData(0));
       break;
-    case Screen::Together: ui::together(lcd, app::uiData(0), app::uiData(1)); break;
+    case Screen::Together: ui::together(lcd, app::uiData(0), app::uiData(1), app::cfg.sharedGoal); break;
+    case Screen::Night: {
+      UiData r[2] = {app::uiData(0), app::uiData(1)};
+      time_t t = time(nullptr);
+      tm l;
+      localtime_r(&t, &l);
+      char hm[8], date[40];
+      snprintf(hm, sizeof hm, "%d:%02d", l.tm_hour % 12 ? l.tm_hour % 12 : 12, l.tm_min);
+      strftime(date, sizeof date, "%A, %B %e", &l);
+      for (char* p = date; *p; p++) *p = toupper(*p);
+      ui::night(lcd, r, duoShown() ? 2 : 1, hm, l.tm_hour < 12 ? "AM" : "PM", date);
+      break;
+    }
     case Screen::Info: ui::info(lcd, ("http://" + ip + "/").c_str(), ip.c_str(), WiFi.SSID().c_str(), app::cfg.led == 2); break;
     case Screen::Link: ui::linkStrava(lcd, ("http://" + ip + "/link").c_str(), ip.c_str(), run[0].needRelink); break;
     case Screen::WifiRetry: ui::wifiRetry(lcd, WiFi.SSID().c_str()); break;
@@ -669,7 +737,7 @@ void handleTouch() {
       lgfx::touch_point_t raw;
       lcd.getTouchRaw(&raw, 1);
       Serial.printf("touch down x=%d y=%d raw=%d,%d\n", (int)touchX, (int)touchY, raw.x, raw.y);
-      swallowTap = extras::screenOff();  // first touch in a dark room only lights the screen
+      swallowTap = extras::screenOff() || extras::night();  // first touch in a dark room only wakes the screen
       extras::wake();
       extras::dismiss();
       applyBacklight();
@@ -747,6 +815,10 @@ void saveSettings() {
   prefs.putString("name1", cfg.name2);
   prefs.putFloat("goal1", cfg.goalMi2);
   prefs.putUChar("kinds1", cfg.kinds2);
+  prefs.putFloat("shared", cfg.sharedGoal);
+  prefs.putBool("nightclk", cfg.nightClock);
+  prefs.putUChar("ledfx", cfg.ledFx);
+  prefs.putUChar("ledn", cfg.ledCount);
   applyBacklight();
   dirty = true;
 }
@@ -801,6 +873,10 @@ void setCarryInMi(float mi) {
 String ip() { return WiFi.localIP().toString(); }
 
 void requestUpdate() { wantOta = true; }
+void photoChanged() {
+  loadPhoto();
+  dirty = true;
+}
 String updateStatus() { return otaStatus; }
 
 uint32_t lastSyncAgoS() {
@@ -842,6 +918,32 @@ UiData uiData(int i) {
   d.wx_temp = w.temp;
   d.wx_rain = w.rain;
   d.wx_desc = extras::describe(w.code);
+  const int32_t day = timeValid() ? localNow() / 86400 : R.statDay;
+  if (day == R.statDay) {
+    d.today_m = R.todayM, d.week_m = R.weekM, d.month_m = R.monthM;
+  } else {  // a new day since this runner was last counted: start from zero where the period rolled over
+    const bool newWeek = (day + 3) % 7 < (R.statDay + 3) % 7 || day - R.statDay >= 7;
+    time_t tn = time(nullptr);
+    tm l;
+    localtime_r(&tn, &l);
+    d.week_m = newWeek ? 0 : R.weekM;
+    d.month_m = acts::daysFromCivil(l.tm_year + 1900, l.tm_mon + 1, 1) > R.statDay ? 0 : R.monthM;
+  }
+  if (w.valid && timeValid()) {
+    time_t tn = time(nullptr);
+    for (int k = 0; k < w.ndays && k < 3; k++) {
+      DayFc& f = d.fc[k];
+      f.valid = true;
+      f.hi = w.days[k].hi, f.lo = w.days[k].lo, f.rain = w.days[k].rain;
+      f.desc = extras::describe(w.days[k].code);
+      time_t td = tn + k * 86400;
+      tm l;
+      localtime_r(&td, &l);
+      if (k == 0) strcpy(f.name, "TODAY");
+      else strftime(f.name, sizeof f.name, "%a", &l);
+      for (char* p = f.name; *p; p++) *p = toupper(*p);
+    }
+  }
   d.wifi_ok = netUp;
   d.sync_error = R.lastResult != src::OK || R.needRelink;
   d.source = R.kind == src::GOOGLE ? "FITBIT" : R.kind == src::APPLE ? "APPLE" : R.kind == src::POLAR ? "POLAR" : R.kind == src::GARMIN ? "GARMIN" : "STRAVA";
@@ -869,9 +971,11 @@ void setup() {
   prefs.begin("app", false);
   loadSettings();
   extras::begin();
+  clockchip::begin();  // time from the clock chip, so the miles and new-year reset don't wait for WiFi
   setenv("TZ", app::cfg.tz.c_str(), 1);
   tzset();
   if (!LittleFS.begin(false)) Serial.println("LittleFS mount failed; skipping intro");
+  loadPhoto();
   src::begin();
   snap();
   src::use(1);
@@ -948,6 +1052,9 @@ void loop() {
   updatePace();
   applyBacklight();
   maybeOta();
+
+  static int shownMin = -1;  // night clock: redraw when the minute changes
+  if (shown == Screen::Night && time(nullptr) / 60 != shownMin) shownMin = time(nullptr) / 60, dirty = true;
 
   if ((overlayInfo || together) && millis() - infoSince > INFO_TIMEOUT_MS) {
     overlayInfo = together = false;

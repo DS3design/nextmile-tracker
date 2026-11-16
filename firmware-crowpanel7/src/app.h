@@ -23,6 +23,10 @@ struct Settings {
   String name2;
   float goalMi2 = 0;
   uint8_t kinds2 = 1;
+  float sharedGoal = 0;   // two-runner mode: miles to reach together; 0 = both goals added up
+  bool nightClock = true; // dark room: big dim clock instead of turning the screen off
+  uint8_t ledFx = 5;      // ledfx::Effect after new miles' opening fireworks
+  uint8_t ledCount = 10;  // LEDs on the strip
 };
 
 namespace app {
@@ -39,6 +43,7 @@ void requestUpdate();
 String updateStatus();
 float carryInMi();
 void setCarryInMi(float mi);
+void photoChanged();  // /photo.jpg was uploaded or removed
 UiData uiData();  // the runner the settings page is on
 UiData uiData(int runner);
 int runners();  // 1, or 2 in two-runner mode

@@ -5,6 +5,9 @@
 #include <string.h>
 #include <time.h>
 #include "../firmware-crowpanel7/src/ui.h"
+#include "../firmware-crowpanel7/src/ledfx.h"
+#include <math.h>
+#include <vector>
 
 static void save(LGFX_Sprite& s, const char* path) {
   FILE* f = fopen(path, "wb");
@@ -33,6 +36,12 @@ int main() {
   d.last.valid = true; strcpy(d.last.name, "Morning Run"); d.last.meters = 5.21f * 1609.344f;
   d.last.moving_s = 50 * 60 + 22; d.last.start_local = 1794470400 + 7 * 3600;  // Tue Nov 10 2026
   d.wx_valid = true; d.wx_temp = 53; d.wx_rain = 0; d.wx_desc = "CLEAR";
+  ui::main(s, d); save(s, "out7/main_nofc.ppm");
+  const char* dn[3] = {"TODAY", "TUE", "WED"};
+  const int hi[3] = {58, 61, 49}, lo[3] = {41, 44, 39}, rn[3] = {0, 10, 70};
+  const char* ds[3] = {"CLEAR", "PT CLOUDY", "RAIN"};
+  for (int i = 0; i < 3; i++) { d.fc[i].valid = true; d.fc[i].hi = hi[i]; d.fc[i].lo = lo[i]; d.fc[i].rain = rn[i]; d.fc[i].desc = ds[i]; strcpy(d.fc[i].name, dn[i]); }
+  d.today_m = 3.1f * 1609.344f; d.week_m = 14.2f * 1609.344f; d.month_m = 41.8f * 1609.344f;
   ui::main(s, d); save(s, "out7/main.ppm");
   for (uint32_t ms = 1000; ms <= 3000; ms += 50) ui::confettiStep(s, ms);
   save(s, "out7/main_confetti.ppm");
@@ -61,7 +70,37 @@ int main() {
     for (uint32_t ms = 1000; ms <= 3000; ms += 50) ui::confettiStep(s, ms);
     save(s, "out7/duo_confetti.ppm");
     ui::confettiClear(s); ui::confettiReset();
+    b.today_m = 0; b.week_m = 18.4f * 1609.344f; b.month_m = 41.8f * 1609.344f;
     ui::together(s, a, b); save(s, "out7/together.ppm");
+    ui::together(s, a, b, 1000); save(s, "out7/together_shared.ppm");
+    UiData an = a, bn = b; an.fc[0].valid = false;
+    ui::together(s, an, bn); save(s, "out7/together_nofc.ppm");
+    UiData both[2] = {a, b};
+    ui::night(s, both, 2, "10:42", "PM", "MONDAY, NOVEMBER 16"); save(s, "out7/night_duo.ppm");
+    ui::night(s, both, 1, "6:05", "AM", "TUESDAY, NOVEMBER 17"); save(s, "out7/night.ppm");
+    // Photo behind the miles: a made-up sunset gradient with a hill.
+    std::vector<uint16_t> ph(800 * 480);
+    for (int y = 0; y < 480; y++) for (int x = 0; x < 800; x++) {
+      bool hill = y > 300 + 60 * sinf(x / 130.0f);
+      int r = hill ? 30 : 255 - y / 3, g = hill ? 70 : 120 + y / 4, bl = hill ? 30 : 200 - y / 3;
+      ph[y * 800 + x] = (r >> 3) << 11 | (g >> 2) << 5 | bl >> 3;
+    }
+    ui::setBackdrop(ph.data());
+    ui::main(s, d); save(s, "out7/photo_main.ppm");
+    ui::duo(s, a, b); save(s, "out7/photo_duo.ppm");
+    ui::setBackdrop(nullptr);
+  }
+  {
+    // LED strip preview: each row is one frame (40 ms), each column one of 10 LEDs, drawn 16 px wide.
+    for (int e = 0; e < ledfx::EFFECT_N - 1; e++) {
+      LGFX_Sprite st; st.setColorDepth(16); st.createSprite(10 * 16, 150 * 3);
+      ledfx::reset(); ledfx::Px px[10];
+      for (int f = 0; f < 150; f++) {
+        ledfx::step(px, 10, 20000 + f * 40, e, 0xFF0000);
+        for (int i = 0; i < 10; i++) st.fillRect(i * 16, f * 3, 15, 3, st.color888(px[i].r * 255, px[i].g * 255, px[i].b * 255));
+      }
+      char p[40]; snprintf(p, sizeof p, "out7/led_%d.ppm", e); save(st, p);
+    }
   }
   ui::WifiNet nets[] = {{"DS3DESIGN", -48, false}, {"Schomer-Home", -63, false}, {"NETGEAR-Guest-Network-Extended", -70, false}, {"xfinitywifi", -80, true}, {"Linksys", -85, false}};
   ui::wifiList(s, nets, 5, 0, false, nullptr); save(s, "out7/setup_wifi.ppm");

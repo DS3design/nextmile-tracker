@@ -133,6 +133,13 @@ int current() { return slot; }
 
 const Totals& totals() { return tot; }
 
+float since(int32_t from) {
+  float m = 0;
+  for (const Run& r : runs)
+    if (r.local >= from) m += r.m;
+  return m;
+}
+
 void clear() {
   prefs.clear();
   runs.clear();
