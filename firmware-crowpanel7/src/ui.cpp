@@ -450,14 +450,14 @@ void together(lgfx::LovyanGFX& g, const UiData& a, const UiData& b, float shared
   }
   // Race: who's ahead this week, this month and this year.
   const bool fc = a.fc[0].valid;
-  const int ry = fc ? 334 : 340, rh = fc ? 70 : 132;
+  const int ry = fc ? 330 : 340, rh = fc ? 78 : 132;
   g.fillRoundRect(M, ry, W - 2 * M, rh, 12, c(g, PANEL));
   const char* const P[3] = {"THIS WEEK", "THIS MONTH", "THIS YEAR"};
   const float va[3] = {a.week_m, a.month_m, a.ytd_m}, vb[3] = {b.week_m, b.month_m, b.ytd_m};
   const int cw = (W - 2 * M) / 3;
   for (int k = 0; k < 3; k++) {
     const int cx = M + cw * k + cw / 2;
-    text(g, &f_label, GREY, PANEL, top_center, P[k], cx, ry + (fc ? 8 : 24));
+    text(g, &f_label, GREY, PANEL, top_center, P[k], cx, ry + (fc ? 4 : 24));
     const float d = (va[k] - vb[k]) / 1609.344f;
     char line[48], n[16];
     int lead = d > 0 ? 0 : 1;
@@ -468,14 +468,14 @@ void together(lgfx::LovyanGFX& g, const UiData& a, const UiData& b, float shared
       snprintf(line, sizeof line, "%s +%s", first[lead], n);
     }
     fit(g, &f_mid, line, cw - 50);
-    const int ly = ry + (fc ? 50 : 86);
+    const int ly = ry + (fc ? 56 : 86);
     const bool sq = line[0] != '-' && strcmp(line, "TIED") != 0;
     g.setFont(&f_mid);
     const int lw = g.textWidth(line) + (sq ? 26 : 0);
     if (sq) g.fillRoundRect(cx - lw / 2, ly - 8, 16, 16, 4, c(g, lead ? GREY : RED));
     text(g, &f_mid, WHITE, PANEL, middle_left, line, cx - lw / 2 + (sq ? 26 : 0), ly);
   }
-  if (fc) forecast(g, a, M, 412, W - 2 * M, 60);
+  if (fc) forecast(g, a, M, 416, W - 2 * M, 56);
   if (a.sync_error) g.fillCircle(8, H - 8, 5, c(g, RED));
   if (b.sync_error) g.fillCircle(W - 8, H - 8, 5, c(g, RED));
 }
@@ -502,10 +502,11 @@ void night(lgfx::LovyanGFX& g, const UiData* r, int n, const char* hhmm, const c
     upper(nb, sizeof nb, r[1].athlete[0] ? r[1].athlete : "Runner 2");
     formatMiles(a, sizeof a, r[0].today_m / 1609.344f, 1);
     formatMiles(b, sizeof b, r[1].today_m / 1609.344f, 1);
-    snprintf(line, sizeof line, "%s %s  -  %s %s MI TODAY", na, a, nb, b);
+    snprintf(line, sizeof line, "%s %s  -  %s %s", na, a, nb, b);
+    text(g, &f_label, S, K, top_center, "MILES TODAY", W / 2, 304);
   }
   fit(g, &f_title, line, W - 2 * M);
-  text(g, &f_title, T, K, top_center, line, W / 2, 318);
+  text(g, &f_title, T, K, top_center, line, W / 2, n < 2 ? 318 : 336);
   const DayFc& f = r[0].fc[1];
   if (f.valid) {
     snprintf(line, sizeof line, "TOMORROW  %d/%d\u00b0  %d%% RAIN  %s", f.hi, f.lo, f.rain, f.desc);
