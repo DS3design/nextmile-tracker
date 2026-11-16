@@ -674,8 +674,7 @@ void tzStep(int dir) {
       app::cfg.tz = z.posix;
       app::cfg.tzManual = true;
       app::applyTz();
-      for (int r = 0; r < app::runners(); r++) { src::use(r); app::requestSync(true); }
-      src::use(setRunner);
+      for (int r = 0; r < app::runners(); r++) app::requestSync(true, r);
       break;
     }
 }
@@ -708,14 +707,14 @@ void setApply(int id, int dir) {  // dir: -1 left/minus, +1 right/plus, 0 the ro
     }
     case S_KINDS:
       app::kindsOf(setRunner) = (uint8_t)(((int)app::kindsOf(setRunner) - 1 + dir + 3) % 3 + 1);
-      src::use(setRunner);
-      app::requestSync(true);
+      app::requestSync(true, setRunner);
       break;
     case S_NAME: openEntry(id, app::nameOf(setRunner).c_str()); break;
     case S_LINK: scanWhat = 0; scanOpen = true; break;
     case S_DUO:
       c.duo = !c.duo;
-      if (c.duo) snprintf(setStatusBuf, sizeof setStatusBuf, "Now link runner 2's watch: GOAL tab, Link a watch");
+      if (!c.duo) setRunner = 0;
+      else snprintf(setStatusBuf, sizeof setStatusBuf, "Now link runner 2's watch: GOAL tab, Link a watch");
       break;
     case S_SHARED: c.sharedGoal = max(0.0f, c.sharedGoal + dir * 50); break;
     case S_THEME:
@@ -741,8 +740,7 @@ void setApply(int id, int dir) {  // dir: -1 left/minus, +1 right/plus, 0 the ro
       snprintf(setStatusBuf, sizeof setStatusBuf, "Checking for an update...");
       break;
     case S_SYNC:
-      src::use(setRunner);
-      app::requestSync(true);
+      app::requestSync(true, setRunner);
       snprintf(setStatusBuf, sizeof setStatusBuf, "Refreshing miles...");
       break;
     case S_PHONE: scanWhat = 2; scanOpen = true; break;
@@ -1123,8 +1121,8 @@ void applyTz() {
   for (Runner& r : run) r.wantFull = true, r.bootSync = false;
 }
 
-void requestSync(bool full) {
-  Runner& r = run[src::current()];
+void requestSync(bool full, int runner) {
+  Runner& r = run[runner < 0 ? src::current() : runner];
   if (full) r.wantFull = r.reloadAll = true, r.bootSync = false;
   for (Runner& x : run) x.wantRecent = true, x.backoffUntil = 0;
   dirty = true;

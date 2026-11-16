@@ -758,7 +758,7 @@ uint32_t flakesAt = 0;
 float frand(float a, float b) { return a + (b - a) * (rand() % 1000) / 1000.0f; }
 
 // ---- On-screen settings ------------------------------------------------------
-const int TAB_X = M, TAB_W = 150, TAB_Y0 = 100, TAB_H = 66, TAB_GAP = 10;
+const int TAB_X = M, TAB_W = 150, TAB_Y0 = 96, TAB_H = 52, TAB_GAP = 8;
 const int SROW_X = 200, SROW_W = W - SROW_X - M, SROW_Y0 = 100, SROW_H = 72, SROW_GAP = 8;
 const int CTL_Y = SROW_H / 2 - 26, CTL_W = 52, CTL_H = 52, VAL_W = 108;
 const int CTL_X = SROW_X + SROW_W - (2 * CTL_W + VAL_W) - 16;

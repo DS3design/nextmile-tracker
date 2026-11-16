@@ -33,7 +33,7 @@ namespace app {
 extern Settings cfg;
 void saveSettings();
 void applyTz();
-void requestSync(bool full);
+void requestSync(bool full, int runner = -1);
 void refresh();  // redraw the current screen
 void requestPortal();
 void requestReset();
