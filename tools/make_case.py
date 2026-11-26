@@ -33,7 +33,7 @@ USB_Y, USB_W = PCB_H / 2, 15.0    # USB-C on the right short edge, about centred
 RST_X, RST_Y = 10.0, 7.0          # reset button (BOOT is just below it), front-view coordinates; 15 mm from the case top
 LDR_X, LDR_Y = 4.2, 38.1          # light sensor (R21, white 3.4 x 5.1 mm part) on the front, left of the glass
 LDR_W, LDR_H = 3.8, 5.5
-LED_X, LED_Y = 29.0, 38.0         # RGB LED on the back, front-view coordinates
+LED_X, LED_Y = 30.0, 37.0         # RGB LED on the back, front-view coordinates (recentered on the cut part)
 
 # ---- case ----
 SIDE, TOP, BOTTOM = 8.0, 8.0, 18.0   # frame borders around the board; engraving lives in the bottom band

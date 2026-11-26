@@ -8,3 +8,5 @@ tools/_frames/
 assets/INTRO.mp4
 firmware-crowpanel7/.pio/
 firmware-crowpanel7/src/secrets.h
+flasher/firmware/**/*.bin
+.pio/
