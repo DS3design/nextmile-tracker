@@ -771,7 +771,11 @@ void setup() {
   Serial.begin(115200);
   bootMs = millis();
   lcd.init();
+#ifdef PANEL_FLIP
+  lcd.setRotation(3);   // some ILI9341 clones mount the panel the other way up
+#else
   lcd.setRotation(1);
+#endif
   lcd.setBrightness(0);
   lcd.fillScreen(TFT_BLACK);
   lcd.fillRect(0, 0, 2, 1, TFT_RED);  // confetti needs to read the screen back
