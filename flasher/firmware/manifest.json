@@ -1,0 +1,25 @@
+{
+  "boards": [
+    {
+      "id": "cyd",
+      "name": "Cheap Yellow Display (ESP32-2432S028R)",
+      "probe": "cyd/probe.bin",
+      "app_offset": "0x10000",
+      "base": [
+        ["0x1000", "cyd/bootloader.bin"],
+        ["0x8000", "cyd/partitions.bin"],
+        ["0xe000", "cyd/boot_app0.bin"],
+        ["0x350000", "cyd/littlefs.bin"]
+      ],
+      "detect_map": {
+        "ST7789": "cyd_st7789",
+        "ILI9341": "cyd_ili9341"
+      },
+      "firmwares": [
+        { "id": "cyd_st7789", "name": "ST7789 panel (most CYDs)", "file": "cyd/firmware_st7789.bin" },
+        { "id": "cyd_ili9341", "name": "ILI9341 panel", "file": "cyd/firmware_ili9341.bin" },
+        { "id": "cyd_ili9341_flip", "name": "ILI9341 panel, rotated 180", "file": "cyd/firmware_ili9341_flip.bin" }
+      ]
+    }
+  ]
+}
