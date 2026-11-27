@@ -25,6 +25,7 @@ The `firmware/` folder must sit next to the exe.
 1. Make a new subfolder like `firmware/crowpanel7/` with its bootloader,
    partitions, boot_app0, filesystem image, and firmware `.bin` files.
 2. Add a new entry to `boards` in the manifest:
+   - `chip`: the esptool chip name (`esp32`, `esp32s3`, ...)
    - `base`: the `[offset, file]` pairs always written (bootloader, partitions, boot_app0, filesystem)
    - `app_offset`: where the firmware goes (usually `0x10000`)
    - `probe`: omit it if the board has no detection probe — the firmware is then

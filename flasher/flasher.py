@@ -46,9 +46,9 @@ def list_ports():
     return out
 
 
-def esptool_write(port, images, log, baud='460800'):
+def esptool_write(port, images, log, baud='460800', chip='esp32'):
     """images: list of (offset, filepath). Runs esptool in-process."""
-    args = ['--chip', 'esp32', '--port', port, '--baud', baud,
+    args = ['--chip', chip, '--port', port, '--baud', baud,
             'write-flash'] + [x for pair in images for x in pair]
     oldout, olderr = sys.stdout, sys.stderr
 
@@ -238,7 +238,8 @@ class App(tk.Tk):
             return
         try:
             self.log(f'--- flashing probe to {port} ---')
-            esptool_write(port, self._base_images(b, for_probe=True) + [(b.get('app_offset', '0x10000'), fw_path(probe))], self.log)
+            esptool_write(port, self._base_images(b, for_probe=True) + [(b.get('app_offset', '0x10000'), fw_path(probe))], self.log,
+                          chip=b.get('chip', 'esp32'))
             self.log('--- resetting, reading probe output ---')
             lines = reset_and_read(port, 8, self.log)
             result = None
@@ -290,7 +291,7 @@ class App(tk.Tk):
         try:
             images = self._base_images(b) + [(b.get('app_offset', '0x10000'), fw_path(fwfile))]
             self.log(f'--- flashing {fwfile} to {port} ---')
-            esptool_write(port, images, self.log)
+            esptool_write(port, images, self.log, chip=b.get('chip', 'esp32'))
             self.log('--- resetting, reading boot output ---')
             lines = reset_and_read(port, 15, self.log)
             ok = any('StartAP' in ln or 'NextMile' in ln for ln in lines)

@@ -3,6 +3,7 @@
     {
       "id": "cyd",
       "name": "Cheap Yellow Display (ESP32-2432S028R)",
+      "chip": "esp32",
       "probe": "cyd/probe.bin",
       "app_offset": "0x10000",
       "base": [
